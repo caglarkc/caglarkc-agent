@@ -27,18 +27,18 @@ class ApprovalGuard:
     async def consume_decision(self, approval_decision: ApprovalDecision) -> ApprovalConsumeResult:
         async with self._lock:
             request = self._active_approvals.get(approval_decision.approval_id)
-            if is_stale_approval(request, approval_decision):
-                return ApprovalConsumeResult(
-                    outcome="stale",
-                    reason="approval_not_active_or_expired",
-                    approval_id=approval_decision.approval_id,
-                )
-
             idempotency_pair = (approval_decision.approval_id, approval_decision.idempotency_key)
             if idempotency_pair in self._idempotency_index:
                 return ApprovalConsumeResult(
                     outcome="no-op",
                     reason="duplicate_idempotency_key",
+                    approval_id=approval_decision.approval_id,
+                )
+
+            if is_stale_approval(request, approval_decision):
+                return ApprovalConsumeResult(
+                    outcome="stale",
+                    reason="approval_not_active_or_expired",
                     approval_id=approval_decision.approval_id,
                 )
 

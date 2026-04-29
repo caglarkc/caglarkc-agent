@@ -62,15 +62,19 @@ class GraphManager:
         if not envelope.idempotency_key:
             return ApprovalConsumeResult(outcome="stale", reason="missing_idempotency_key", approval_id="unknown")
 
-        decision = ApprovalDecision.model_validate(
-            {
-                **envelope.payload,
-                "project_id": envelope.project_id,
-                "thread_id": envelope.thread_id,
-                "sprint_id": envelope.sprint_id,
-                "idempotency_key": envelope.idempotency_key,
-            }
-        )
+        try:
+            decision = ApprovalDecision.model_validate(
+                {
+                    **envelope.payload,
+                    "project_id": envelope.project_id,
+                    "thread_id": envelope.thread_id,
+                    "sprint_id": envelope.sprint_id,
+                    "idempotency_key": envelope.idempotency_key,
+                }
+            )
+        except ValidationError as exc:
+            validation_error = event_validation_error(exc)
+            return ApprovalConsumeResult(outcome="stale", reason=validation_error.message, approval_id="unknown")
         result = await self.approval_guard.consume_decision(decision)
 
         if result.outcome in {"stale", "no-op"}:
