@@ -73,14 +73,15 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
             return CommandOutcome(ok=False, message="Usage: /task <metin>", level="error")
         task_text = " ".join(command.args)
         state = context.current_state or {}
+        active_project = await ProjectManager().active_project()
         await context.event_bus.publish(
             "task.received",
             new_event(
                 "task.received",
                 payload={"task_description": task_text},
-                project_id=state.get("project_id"),
+                project_id=(active_project.project_id if active_project else state.get("project_id")),
                 thread_id=state.get("current_thread_id"),
-                correlation_id=state.get("project_id"),
+                correlation_id=(active_project.project_id if active_project else state.get("project_id")),
             ).model_dump(),
         )
         return CommandOutcome(ok=True, message=f"Task queued: {task_text}")
