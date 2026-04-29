@@ -49,3 +49,39 @@ class ProjectManager:
         async with aiofiles.open(destination, "w", encoding="utf-8") as handle:
             await handle.write(content)
         return destination
+
+    async def update_plan_snapshot(
+        self,
+        project_name: str,
+        *,
+        sprint_number: int,
+        sprint_type: str,
+        status: str,
+        files: list[str],
+        dependencies: dict[str, list[str]],
+        plan_version: int,
+        scope_changed: bool = False,
+    ) -> Path:
+        plan = await self.read_plan(project_name) or {
+            "name": project_name,
+            "sprints": [],
+        }
+        plan["status"] = status
+        plan["current_sprint"] = sprint_number
+        plan.setdefault("sprints", []).append(
+            {
+                "number": sprint_number,
+                "type": sprint_type,
+                "status": status,
+                "files": files,
+                "dependencies": dependencies,
+                "plan_version": plan_version,
+                "scope_changed": scope_changed,
+            }
+        )
+        await self.write_plan(project_name, plan)
+        project_root = await self.ensure_project_structure(project_name)
+        snapshot_path = project_root / ".meta" / "sprints" / f"sprint_{sprint_number:03d}_v{plan_version}.json"
+        async with aiofiles.open(snapshot_path, "w", encoding="utf-8") as handle:
+            await handle.write(json.dumps(plan["sprints"][-1], indent=2, ensure_ascii=True))
+        return snapshot_path

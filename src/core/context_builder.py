@@ -20,6 +20,7 @@ class ContextBuilder:
             limit=self._settings.context_max_decisions,
         )
         failures = await self._repository.list_worker_failures(project_id)
+        failure_patterns = self._summarize_failures(failures)
 
         latest_sprint = sprints[-1] if sprints else None
         summary = "\n".join(
@@ -29,7 +30,17 @@ class ContextBuilder:
                 f"Yazilan Dosyalar: {', '.join(item.path for item in files[-5:]) or 'yok'}",
                 f"Mimari Kararlar: {' | '.join(item.summary for item in decisions) or 'yok'}",
                 f"Revizyon Gecmisi: {' | '.join(item.task_type for item in failures) or 'yok'}",
+                f"Failure Learning: {failure_patterns or 'yok'}",
             ]
         )
         await self._project_manager.write_context_debug(project_name, summary)
         return summary
+
+    def _summarize_failures(self, failures: list) -> str:
+        patterns: dict[str, list[str]] = {}
+        for failure in failures:
+            patterns.setdefault(failure.worker_id, []).append(
+                f"{failure.task_type} x{failure.retry_count} -> {failure.recommendation or 'reassign'}"
+            )
+        segments = [f"{worker}: {', '.join(items[:3])}" for worker, items in patterns.items()]
+        return " | ".join(segments[:3])

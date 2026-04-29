@@ -3,68 +3,192 @@ from __future__ import annotations
 from copy import deepcopy
 from uuid import uuid4
 
+from src.core.context_builder import ContextBuilder
 from src.core.contracts import ApprovalRequest, DispatchAssignment, new_event
 from src.core.event_bus import EventBus
+from src.core.project_manager import ProjectManager
 from src.core.state_transaction import StateTransaction
+from src.storage.models import FileRecord, Project, Sprint
+from src.storage.repository import Repository
+
+
+def _contract_queue(project_id: str, thread_id: str, sprint_id: str) -> tuple[list[dict], dict[str, list[str]]]:
+    files = [
+        ("api_contract.json", "Define the initial API contract for the project.", "contract_spec"),
+        ("shared_types.py", "Define shared data models used across the project.", "shared_types"),
+        ("src/__init__.py", "Create the initial package scaffold.", "scaffold"),
+    ]
+    queue = []
+    dependencies = {
+        "api_contract.json": [],
+        "shared_types.py": ["api_contract.json"],
+        "src/__init__.py": ["shared_types.py"],
+    }
+    for target_file, description, task_type in files:
+        queue.append(
+            {
+                "assignment": DispatchAssignment(
+                    task_id=str(uuid4()),
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    sprint_id=sprint_id,
+                    worker_id="unassigned",
+                    target_file=target_file,
+                    description=description,
+                    correlation_id=project_id,
+                    metadata={"kind": "contract", "task_type": task_type},
+                ).model_dump(),
+                "status": "planned",
+                "validation_error": None,
+                "retry_count": 0,
+                "blocked_by": [],
+                "task_type": task_type,
+            }
+        )
+    return queue, dependencies
+
+
+def _feature_queue(project_id: str, thread_id: str, sprint_id: str) -> tuple[list[dict], dict[str, list[str]]]:
+    files = [
+        ("helpers.py", "Create a helper function for the generated project.", "feature_helper"),
+        ("app.py", "Create the application entry that uses helpers.", "feature_entry"),
+    ]
+    queue = []
+    dependencies = {"helpers.py": [], "app.py": ["helpers.py"]}
+    for target_file, description, task_type in files:
+        queue.append(
+            {
+                "assignment": DispatchAssignment(
+                    task_id=str(uuid4()),
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    sprint_id=sprint_id,
+                    worker_id="unassigned",
+                    target_file=target_file,
+                    description=description,
+                    correlation_id=project_id,
+                    metadata={"kind": "feature", "task_type": task_type},
+                ).model_dump(),
+                "status": "planned",
+                "validation_error": None,
+                "retry_count": 0,
+                "blocked_by": [],
+                "task_type": task_type,
+            }
+        )
+    return queue, dependencies
+
+
+def _detect_cycle(dependencies: dict[str, list[str]]) -> bool:
+    visited: set[str] = set()
+    active: set[str] = set()
+
+    def visit(node: str) -> bool:
+        if node in active:
+            return True
+        if node in visited:
+            return False
+        visited.add(node)
+        active.add(node)
+        for dep in dependencies.get(node, []):
+            if visit(dep):
+                return True
+        active.remove(node)
+        return False
+
+    return any(visit(node) for node in dependencies)
 
 
 async def planner_node(state: dict) -> dict:
     project_id = state["project_id"]
     thread_id = state["current_thread_id"]
-    sprint_id = f"sprint-{state.get('current_sprint', 1)}"
+    repository = Repository()
+    project_manager = ProjectManager()
+    await repository.initialize()
+    current_sprint = state.get("current_sprint", 1)
+    plan_version = state.get("plan_version", 1) + (1 if state.get("scope_changed") else 0)
+    sprint_id = f"sprint-{current_sprint}"
+    requested_feature = state.get("requested_sprint_type") == "feature"
+    sprint_type = "contract" if current_sprint == 1 and not state.get("contract_completed") else "feature"
+    if requested_feature and sprint_type == "contract":
+        state_messages = [*state.get("messages", []), "feature sprint request gated until contract sprint completes"]
+    else:
+        state_messages = [*state.get("messages", [])]
 
-    queue = [
-        {
-            "assignment": DispatchAssignment(
-                task_id=str(uuid4()),
-                project_id=project_id,
-                thread_id=thread_id,
-                sprint_id=sprint_id,
-                worker_id="unassigned",
-                target_file="helpers.py",
-                description="Create a helper function for the generated project.",
-                correlation_id=project_id,
-                metadata={"kind": "python"},
-            ).model_dump(),
-            "status": "planned",
-            "validation_error": None,
-        },
-        {
-            "assignment": DispatchAssignment(
-                task_id=str(uuid4()),
-                project_id=project_id,
-                thread_id=thread_id,
-                sprint_id=sprint_id,
-                worker_id="unassigned",
-                target_file="app.py",
-                description="Create the application entry that uses helpers.",
-                correlation_id=project_id,
-                metadata={"kind": "python"},
-            ).model_dump(),
-            "status": "planned",
-            "validation_error": None,
-        },
-    ]
-    dependencies = {
-        "helpers.py": [],
-        "app.py": ["helpers.py"],
-    }
+    if sprint_type == "contract":
+        queue, dependencies = _contract_queue(project_id, thread_id, sprint_id)
+    else:
+        queue, dependencies = _feature_queue(project_id, thread_id, sprint_id)
+
+    if state.get("scope_changed"):
+        for item in queue:
+            item["status"] = "planned"
+        state_messages.append("planner replanned due to scope change")
+
+    if _detect_cycle(dependencies):
+        updates = {
+            "sprint_status": "fail",
+            "errors": [*state.get("errors", []), {"type": "dependency_cycle", "dependencies": dependencies}],
+            "messages": [*state_messages, "planner detected dependency cycle"],
+        }
+        async with StateTransaction(project_id) as transaction:
+            persisted = transaction.state
+            persisted.update(updates)
+            transaction.state = persisted
+        return updates
+
     file_registry = {target_file: "planned" for target_file in dependencies}
+    await repository.upsert_project(
+        Project(
+            project_id=project_id,
+            name=state["project_name"],
+            description=state["task_description"],
+            status="active",
+            metadata={"contract_completed": state.get("contract_completed", False)},
+        )
+    )
+    sprint_record = Sprint(
+        sprint_id=str(uuid4()),
+        project_id=project_id,
+        number=current_sprint,
+        sprint_type=sprint_type,
+        status="planning",
+        plan_version=plan_version,
+        decisions=["scope_changed" if state.get("scope_changed") else "initial_plan"],
+    )
+    await repository.create_sprint(sprint_record)
+    for target_file in file_registry:
+        await repository.upsert_file_record(
+            FileRecord(
+                file_id=str(uuid4()),
+                project_id=project_id,
+                sprint_id=sprint_record.sprint_id,
+                path=target_file,
+                status="planned",
+            )
+        )
+
     approval_request = ApprovalRequest(
         approval_id=str(uuid4()),
         project_id=project_id,
         thread_id=thread_id,
         sprint_id=sprint_id,
         approval_type="plan",
-        reason="Planner generated the initial dependency-aware sprint plan.",
+        reason=f"Planner generated a {sprint_type} sprint plan.",
         metadata={
             "files": list(file_registry.keys()),
             "dependencies": deepcopy(dependencies),
+            "sprint_type": sprint_type,
+            "plan_version": plan_version,
         },
     )
+    context_summary = await ContextBuilder(repository=repository, project_manager=project_manager).build(
+        project_id,
+        state["project_name"],
+    )
     context_summary = (
-        f"Project={state['project_name']} | Sprint={state.get('current_sprint', 1)} | "
-        f"Task={state['task_description']} | Files={', '.join(file_registry.keys())}"
+        f"{context_summary}\nPlanned Sprint Type: {sprint_type} | "
+        f"Files: {', '.join(file_registry.keys())}"
     )
 
     await EventBus().emit(
@@ -75,6 +199,7 @@ async def planner_node(state: dict) -> dict:
                 "project_id": project_id,
                 "sprint_id": sprint_id,
                 "files": list(file_registry.keys()),
+                "sprint_type": sprint_type,
             },
             project_id=project_id,
             thread_id=thread_id,
@@ -99,23 +224,42 @@ async def planner_node(state: dict) -> dict:
         "worker_queue": queue,
         "dependencies": dependencies,
         "file_registry": file_registry,
-        "worker_status": state.get("worker_status", {"worker_a": "idle"}),
-        "worker_outputs": state.get("worker_outputs", {"worker_a": []}),
-        "worker_failure_log": state.get("worker_failure_log", {"worker_a": []}),
-        "current_sprint": state.get("current_sprint", 1),
-        "sprint_type": "feature",
+        "worker_status": state.get("worker_status", {"worker_a": "idle", "worker_b": "idle", "worker_c": "idle"}),
+        "worker_outputs": state.get("worker_outputs", {"worker_a": [], "worker_b": [], "worker_c": []}),
+        "worker_failure_log": state.get("worker_failure_log", {"worker_a": [], "worker_b": [], "worker_c": []}),
+        "current_sprint": current_sprint,
+        "sprint_type": sprint_type,
         "sprint_status": "planning",
         "awaiting_approval": True,
         "approval_type": "plan",
         "active_approval_id": approval_request.approval_id,
         "approval_request": approval_request.model_dump(),
         "context_summary": context_summary,
-        "messages": [*state.get("messages", []), "planner completed"],
+        "messages": [*state_messages, "planner completed"],
         "errors": state.get("errors", []),
         "validation_issues": [],
         "revision_tasks": [],
         "active_assignment": None,
+        "active_assignments": {},
+        "blocked_reasons": [],
+        "plan_version": plan_version,
+        "last_scope_change": (
+            {"reason": state.get("scope_change_reason", "external_requirement"), "handled": True}
+            if state.get("scope_changed")
+            else state.get("last_scope_change")
+        ),
+        "scope_changed": False,
     }
+    await project_manager.update_plan_snapshot(
+        state["project_name"],
+        sprint_number=current_sprint,
+        sprint_type=sprint_type,
+        status="planning",
+        files=list(file_registry.keys()),
+        dependencies=dependencies,
+        plan_version=plan_version,
+        scope_changed=bool(state.get("last_scope_change")),
+    )
 
     async with StateTransaction(project_id) as transaction:
         persisted = transaction.state
