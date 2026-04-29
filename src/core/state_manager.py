@@ -35,3 +35,7 @@ class StateManager:
     async def delete(self, key: str) -> None:
         async with self._lock:
             self._state.pop(key, None)
+
+    async def snapshot(self) -> dict[str, Any]:
+        async with self._lock:
+            return deepcopy(self._state)
