@@ -11,7 +11,7 @@
 **Amaç**: Tüm AI sağlayıcıları bağla, LangGraph kurulumunu doğrula, core iskelet ve storage schema'sını hazırla.  
 **Skill**: `langgraph-patterns`, `project-architecture`
 
-### Görevler s
+### Görevler
 
 - [ ] Proje klasör yapısını oluştur (`project-architecture` skill'e göre)
 - [ ] `pyproject.toml` ve `.env` şablonunu oluştur
