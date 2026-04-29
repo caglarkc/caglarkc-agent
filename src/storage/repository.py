@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 
 import aiosqlite
+import aiofiles.os
 
 from src.config.settings import get_settings
 from src.storage.models import Decision, FileRecord, Project, Sprint, WorkerFailureLog
@@ -17,7 +18,7 @@ class Repository:
 
     async def initialize(self) -> None:
         settings = get_settings()
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        await aiofiles.os.makedirs(settings.data_dir, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as connection:
             await connection.executescript(
                 """

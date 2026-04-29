@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
 
+import aiofiles.os
 import httpx
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from src.config.logging_config import configure_logging
 from src.config.settings import get_settings
@@ -64,19 +63,14 @@ async def check_openrouter(api_key: str, label: str) -> CheckResult:
 
 async def check_sqlite_saver() -> CheckResult:
     settings = get_settings()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    await aiofiles.os.makedirs(settings.data_dir, exist_ok=True)
     repository = Repository()
     await repository.initialize()
 
-    async with AsyncSqliteSaver.from_conn_string(str(settings.graph_checkpoint_path)) as saver:
-        config = {"configurable": {"thread_id": f"{settings.graph_thread_prefix}-checkpoint"}}
-        checkpoint = {"v": 1, "ts": "phase1", "id": "phase1", "channel_values": {"status": "ok"}, "channel_versions": {}, "versions_seen": {}}
-        metadata: dict[str, Any] = {"source": "smoke-test"}
-        await saver.aput(config=config, checkpoint=checkpoint, metadata=metadata, new_versions={})
-        saved = await saver.aget_tuple(config)
-    if saved is None:
+    result = await run_minimal_graph()
+    if not result["checkpoint_values"]:
         return CheckResult("SqliteSaver", False, "Checkpoint okunamadi.")
-    return CheckResult("SqliteSaver", True, "Checkpoint yazildi ve geri okundu.")
+    return CheckResult("SqliteSaver", True, f"Checkpoint yazildi ve geri okundu: {result['thread_id']}")
 
 
 async def check_graph_flow() -> CheckResult:
@@ -90,7 +84,7 @@ async def check_graph_flow() -> CheckResult:
             True,
             f"thread_id={result['thread_id']}, next={result['checkpoint_next']}",
         )
-    return CheckResult("LangGraph Flow", False, f"Beklenen akis tamamlmadi: {messages}")
+    return CheckResult("LangGraph Flow", False, f"Beklenen akis tamamlanmadi: {messages}")
 
 
 async def run_checks() -> list[CheckResult]:

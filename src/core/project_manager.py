@@ -6,6 +6,7 @@ from typing import Any
 
 import aiofiles
 import aiofiles.os
+import aiofiles.ospath
 
 from src.config.settings import get_settings
 
@@ -28,7 +29,7 @@ class ProjectManager:
 
     async def read_plan(self, project_name: str) -> dict[str, Any] | None:
         plan_path = self._settings.projects_root / project_name / ".meta" / "plan.json"
-        if not plan_path.exists():
+        if not await aiofiles.ospath.exists(plan_path):
             return None
         async with aiofiles.open(plan_path, "r", encoding="utf-8") as handle:
             content = await handle.read()
