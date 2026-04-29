@@ -39,7 +39,7 @@ Gemini, Ollama ve her iki OpenRouter bağlantısı çalışıyor. LangGraph Sqli
 
 ## Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri
 
-**Durum**: 🔄 Aktif  
+**Durum**: ✅ Tamamlandı  
 **Amaç**: Graph, storage, interface ve worker davranışları için tek bir sözleşme katmanı tanımlamak.  
 **Skill**: `project-architecture`, `langgraph-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 1 tamamlanmış olmalı
@@ -74,7 +74,7 @@ Tüm node ve interface akışları tek bir contract dokümanına bağlı. Rastge
 
 ## Faz 2 — LangGraph Core: State ve Graph Yapısı
 
-**Durum**: ⬜ Bekliyor  
+**Durum**: 🔄 Aktif  
 **Amaç**: Projenin ana state makinesini ve node/edge yapısını inşa et.  
 **Skill**: `langgraph-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 1 + Faz 1.5 tamamlanmış olmalı
@@ -370,6 +370,6 @@ Bu bölüm Faz 4-8 teslimlerinde zorunlu kabul kriteri olarak uygulanır.
 
 ## Güncel Durum
 
-**Aktif Faz**: Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri  
-**Son Güncelleme**: Faz 1 tamamlandı, Faz 1.5 başlatıldı  
-**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar
+**Aktif Faz**: Faz 2 — LangGraph Core: State ve Graph Yapısı  
+**Son Güncelleme**: Faz 1.5 tamamlandı, Faz 2 başlatıldı  
+**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri
