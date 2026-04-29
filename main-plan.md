@@ -61,6 +61,9 @@ Proje biter → Sen bilgilendirilirsin
 3. **Otomatik hata döngüsü** — Worker hata yaparsa Gemini tekrar gönderir. Sen müdahale etmek zorunda değilsin.
 4. **Arayüz senkronluğu** — Telegram ve CLI her zaman senkron. İkisinden de aynı aksiyonları yapabilirsin.
 5. **Crash recovery** — Sistem çökerse SQLite persistence sayesinde kaldığı yerden devam eder.
+6. **Sözleşme odaklı orkestrasyon** — ID/Event/Approval contract olmadan hiçbir kritik akış üretime alınmaz.
+7. **Güvenli onay akışı** — Onaylar `approval_id` ve idempotency ile doğrulanır; stale onaylar state değiştiremez.
+8. **Ölçülebilir kalite** — Faz kapanışları yalnızca ölçülebilir metriklerle yapılır (restore süresi, retry başarısı, fallback oranı).
 
 ---
 
@@ -69,6 +72,7 @@ Proje biter → Sen bilgilendirilirsin
 | Faz | Ad | Durum |
 |---|---|---|
 | 1 | Altyapı ve Bağlantılar | ⬜ Bekliyor |
+| 1.5 | Orchestration Contract | ⬜ Bekliyor |
 | 2 | Core Orchestration | ⬜ Bekliyor |
 | 3 | Dinamik Worker Sistemi | ⬜ Bekliyor |
 | 4 | Review ve Döngü Sistemi | ⬜ Bekliyor |
