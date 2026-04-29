@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import ValidationError
+from langgraph.types import Command
 
 from src.core.approval_guard import ApprovalConsumeResult, ApprovalGuard
 from src.core.contracts import ApprovalDecision, ApprovalRequest, event_validation_error, validate_event
@@ -31,14 +32,33 @@ class GraphManager:
         self.resume_callback = resume_callback
         self.reject_callback = reject_callback
         self.cancel_callback = cancel_callback
+        self.graph = None
+        self._thread_configs: dict[str, dict[str, Any]] = {}
 
     async def start(self) -> None:
+        await self.event_bus.subscribe("plan.approval_needed", self.on_plan_approval_needed)
         await self.event_bus.subscribe("plan.approved", self.on_plan_approved)
         await self.event_bus.subscribe("plan.rejected", self.on_plan_rejected)
         await self.event_bus.subscribe("plan.cancelled", self.on_plan_cancelled)
 
     async def register_approval(self, approval_request: ApprovalRequest) -> None:
         await self.approval_guard.register_approval(approval_request)
+
+    def attach_graph(self, graph: Any) -> None:
+        self.graph = graph
+
+    def register_thread(self, thread_id: str, config: dict[str, Any]) -> None:
+        self._thread_configs[thread_id] = config
+
+    async def on_plan_approval_needed(self, raw_event: dict[str, Any]) -> None:
+        try:
+            envelope = validate_event(raw_event)
+            approval_request = ApprovalRequest.model_validate(envelope.payload)
+        except ValidationError as exc:
+            validation_error = event_validation_error(exc)
+            LOGGER.warning("Approval request validation failed: %s", validation_error.model_dump())
+            return
+        await self.register_approval(approval_request)
 
     async def on_plan_approved(self, raw_event: dict[str, Any]) -> None:
         return await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
@@ -96,9 +116,58 @@ class GraphManager:
         return result
 
     async def _dispatch_graph_action(self, decision: ApprovalDecision) -> None:
-        if decision.decision == "approved" and self.resume_callback is not None:
+        if decision.decision == "approved":
+            await self._resume_graph(decision)
+        elif decision.decision == "rejected":
+            await self._stop_graph(decision, terminal_status="rejected", callback=self.reject_callback)
+        elif decision.decision == "cancelled":
+            await self._stop_graph(decision, terminal_status="cancelled", callback=self.cancel_callback)
+
+    async def _resume_graph(self, decision: ApprovalDecision) -> None:
+        if self.resume_callback is not None:
             await self.resume_callback(decision)
-        elif decision.decision == "rejected" and self.reject_callback is not None:
-            await self.reject_callback(decision)
-        elif decision.decision == "cancelled" and self.cancel_callback is not None:
-            await self.cancel_callback(decision)
+        if self.graph is None:
+            return
+        config = self._thread_configs.get(decision.thread_id)
+        if config is None:
+            LOGGER.warning("Missing thread config for resume: %s", decision.thread_id)
+            return
+        await self.graph.aupdate_state(
+            config,
+            {
+                "awaiting_approval": False,
+                "approval_type": "",
+                "active_approval_id": None,
+                "messages": [f"approval accepted for {decision.approval_id}"],
+            },
+            as_node="planner",
+        )
+        await self.graph.ainvoke(Command(goto="dispatcher"), config=config)
+
+    async def _stop_graph(
+        self,
+        decision: ApprovalDecision,
+        *,
+        terminal_status: str,
+        callback: ResumeCallback | None,
+    ) -> None:
+        if callback is not None:
+            await callback(decision)
+        if self.graph is None:
+            return
+        config = self._thread_configs.get(decision.thread_id)
+        if config is None:
+            LOGGER.warning("Missing thread config for stop: %s", decision.thread_id)
+            return
+        await self.graph.aupdate_state(
+            config,
+            {
+                "awaiting_approval": False,
+                "approval_type": "",
+                "active_approval_id": None,
+                "sprint_status": "fail",
+                "errors": [{"type": terminal_status, "approval_id": decision.approval_id}],
+                "messages": [f"approval {terminal_status} for {decision.approval_id}"],
+            },
+            as_node="planner",
+        )
