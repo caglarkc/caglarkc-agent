@@ -31,3 +31,22 @@ def format_telegram_status(state: dict[str, Any] | None, *, active_approval: dic
             f"Approval: {active_approval.get('approval_id')} | {active_approval.get('approval_type')} | {active_approval.get('status', 'pending')}"
         )
     return "\n".join(lines)
+
+
+def format_telegram_projects(projects: list[Any], *, active_project_id: str | None = None) -> str:
+    if not projects:
+        return "Projeler: yok"
+    lines = ["Projeler:"]
+    for project in projects:
+        marker = "*" if getattr(project, "project_id", None) == active_project_id or project.metadata.get("selected") else "-"
+        lines.append(f"{marker} {project.project_id} | {project.name} | {project.status}")
+    return "\n".join(lines)
+
+
+def format_telegram_history(project_name: str, items: list[dict[str, Any]]) -> str:
+    if not items:
+        return f"Gecmis: {project_name} | yok"
+    lines = [f"Gecmis: {project_name}"]
+    for item in items:
+        lines.append(f"- S{item['number']} | {item['type']} | {item['status']} | r={item['review_cycles']} | v{item['plan_version']}")
+    return "\n".join(lines)
