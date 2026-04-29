@@ -48,6 +48,10 @@ class OrchestratorState(TypedDict, total=False):
     blocked_reasons: list[dict[str, Any]]
     reservation_conflicts: list[dict[str, Any]]
     last_scope_change: dict[str, Any] | None
+    last_heartbeat_at: str | None
+    last_activity_at: str | None
+    stalled_since: str | None
+    reviewer_decision: str | None
 
 
 def build_initial_state(
@@ -89,4 +93,8 @@ def build_initial_state(
         "blocked_reasons": [],
         "reservation_conflicts": [],
         "last_scope_change": None,
+        "last_heartbeat_at": None,
+        "last_activity_at": None,
+        "stalled_since": None,
+        "reviewer_decision": None,
     }

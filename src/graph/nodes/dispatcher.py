@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from copy import deepcopy
 from uuid import uuid4
 
@@ -9,6 +10,29 @@ from src.core.retry_policy import classify_error
 from src.core.state_transaction import StateTransaction
 from src.storage.models import FileRecord
 from src.storage.repository import Repository
+
+
+HEARTBEAT_INTERVAL_SECONDS = 60
+STALL_TIMEOUT_SECONDS = 600
+ACTIVE_ASSIGNMENT_GRACE_SECONDS = 180
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def should_emit_stalled(
+    *,
+    last_heartbeat_at: str | None,
+    active_assignment: dict | None,
+    now: datetime | None = None,
+) -> bool:
+    if not last_heartbeat_at:
+        return False
+    current_time = now or datetime.now(timezone.utc)
+    last_seen = datetime.fromisoformat(last_heartbeat_at)
+    grace = ACTIVE_ASSIGNMENT_GRACE_SECONDS if active_assignment else 0
+    return current_time - last_seen > timedelta(seconds=STALL_TIMEOUT_SECONDS + grace)
 
 
 def _detect_cycle(dependencies: dict[str, list[str]]) -> bool:
@@ -39,6 +63,7 @@ async def dispatcher_node(state: dict) -> dict:
     file_registry = deepcopy(state.get("file_registry", {}))
     worker_status = deepcopy(state.get("worker_status", {}))
     reservation_conflicts = deepcopy(state.get("reservation_conflicts", []))
+    last_heartbeat_at = state.get("last_heartbeat_at")
     project_id = state["project_id"]
     thread_id = state["current_thread_id"]
     sprint_id = f"sprint-{state.get('current_sprint', 1)}"
@@ -62,6 +87,26 @@ async def dispatcher_node(state: dict) -> dict:
         return updates
 
     if state.get("active_assignment") is not None:
+        if should_emit_stalled(
+            last_heartbeat_at=last_heartbeat_at,
+            active_assignment=state.get("active_assignment"),
+        ):
+            stalled_at = utc_now_iso()
+            await EventBus().emit(
+                "system.stalled",
+                new_event(
+                    "system.stalled",
+                    payload={"reason": "active_assignment_silent", "project_id": project_id},
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    sprint_id=sprint_id,
+                    correlation_id=project_id,
+                ).model_dump(),
+            )
+            return {
+                "stalled_since": stalled_at,
+                "messages": [*state.get("messages", []), "dispatcher detected stalled active assignment"],
+            }
         return {
             "messages": [*state.get("messages", []), "dispatcher detected active assignment"],
         }
@@ -75,6 +120,26 @@ async def dispatcher_node(state: dict) -> dict:
 
     idle_worker = next((worker_id for worker_id, status in worker_status.items() if status == "idle"), None)
     if idle_worker is None:
+        if should_emit_stalled(
+            last_heartbeat_at=last_heartbeat_at,
+            active_assignment=state.get("active_assignment"),
+        ):
+            stalled_at = utc_now_iso()
+            await EventBus().emit(
+                "system.stalled",
+                new_event(
+                    "system.stalled",
+                    payload={"reason": "no_worker_and_no_heartbeat", "project_id": project_id},
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    sprint_id=sprint_id,
+                    correlation_id=project_id,
+                ).model_dump(),
+            )
+            return {
+                "stalled_since": stalled_at,
+                "messages": [*state.get("messages", []), "dispatcher emitted stalled due to heartbeat silence"],
+            }
         return {
             "messages": [*state.get("messages", []), "dispatcher found no idle worker"],
         }
@@ -156,6 +221,7 @@ async def dispatcher_node(state: dict) -> dict:
             correlation_id=selected_assignment["task_id"],
         ).model_dump(),
     )
+    heartbeat_at = utc_now_iso()
 
     updates = {
         "worker_queue": queue,
@@ -164,6 +230,9 @@ async def dispatcher_node(state: dict) -> dict:
         "active_assignment": selected_assignment,
         "blocked_reasons": blocked_reasons,
         "reservation_conflicts": reservation_conflicts,
+        "last_heartbeat_at": heartbeat_at,
+        "last_activity_at": heartbeat_at,
+        "stalled_since": None,
         "messages": [*state.get("messages", []), f"dispatcher assigned {target_file} to {idle_worker}"],
     }
     async with StateTransaction(project_id) as transaction:
