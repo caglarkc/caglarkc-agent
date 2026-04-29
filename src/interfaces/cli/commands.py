@@ -6,8 +6,9 @@ from typing import Any
 from uuid import uuid4
 
 from src.core.contracts import new_event
+from src.core.project_manager import ProjectManager
 from src.interfaces.cli.notifier import CLINotifier
-from src.interfaces.cli.state_view import format_status_summary
+from src.interfaces.cli.state_view import format_project_history, format_projects_listing, format_status_summary
 
 
 HELP_TEXT = "\n".join(
@@ -17,6 +18,9 @@ HELP_TEXT = "\n".join(
         "/approve [approval_id]",
         "/reject [approval_id] [reason]",
         "/cancel [approval_id] [reason]",
+        "/projects",
+        "/history <proje>",
+        "/project use <id>",
         "/help",
     ]
 )
@@ -85,9 +89,50 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
             ok=True,
             message=format_status_summary(context.current_state, active_approval=context.active_approval),
         )
+    if command.name == "projects":
+        return await _handle_projects_command()
+    if command.name == "history":
+        return await _handle_history_command(command)
+    if command.name == "project":
+        return await _handle_project_command(command, context)
     if command.name in {"approve", "reject", "cancel"}:
         return await _handle_approval_command(command, context)
     return CommandOutcome(ok=False, message=f"Unknown command: /{command.name}\n{HELP_TEXT}", level="error")
+
+
+async def _handle_projects_command() -> CommandOutcome:
+    manager = ProjectManager()
+    projects = await manager.list_projects(active_only=True)
+    active = await manager.active_project()
+    return CommandOutcome(
+        ok=True,
+        message=format_projects_listing(projects, active_project_id=active.project_id if active else None),
+    )
+
+
+async def _handle_history_command(command: ParsedCommand) -> CommandOutcome:
+    if not command.args:
+        return CommandOutcome(ok=False, message="Usage: /history <proje>", level="error")
+    manager = ProjectManager()
+    project_ref = " ".join(command.args)
+    project = await manager.get_project(project_ref)
+    if project is None:
+        return CommandOutcome(ok=False, message=f"Project not found: {project_ref}", level="warning")
+    history = await manager.project_history(project.project_id)
+    return CommandOutcome(ok=True, message=format_project_history(project.name, history))
+
+
+async def _handle_project_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    if len(command.args) != 2 or command.args[0] != "use":
+        return CommandOutcome(ok=False, message="Usage: /project use <id>", level="error")
+    manager = ProjectManager()
+    project = await manager.select_active_project(command.args[1])
+    if project is None:
+        return CommandOutcome(ok=False, message=f"Project not found: {command.args[1]}", level="warning")
+    if context.current_state is not None:
+        context.current_state["project_id"] = project.project_id
+        context.current_state["project_name"] = project.name
+    return CommandOutcome(ok=True, message=f"Active project set: {project.project_id} | {project.name}")
 
 
 async def _handle_approval_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
