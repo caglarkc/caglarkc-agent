@@ -171,7 +171,7 @@ Farklı proje tiplerinde (full stack, backend only, CLI tool) Gemini doğru cont
 
 ## Faz 4 — Review, Validasyon ve Context Yönetimi
 
-**Durum**: 🔄 Aktif  
+**Durum**: ✅ Tamamlandı  
 **Amaç**: Otomatik review döngüsünü, kod validasyonunu ve Gemini context inject sistemini tamamla.  
 **Skill**: `langgraph-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 3 tamamlanmış olmalı
@@ -216,7 +216,7 @@ Worker hatalı kod yazdığında validator yakalar, reviewer fark eder, revize e
 
 ## Faz 5 — CLI Arayüzü
 
-**Durum**: ⬜ Bekliyor  
+**Durum**: 🔄 Aktif  
 **Amaç**: PC başındayken görsel terminal arayüzü ile yönetim.  
 **Skill**: `telegram-bot-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 4 tamamlanmış olmalı
@@ -370,6 +370,6 @@ Bu bölüm Faz 4-8 teslimlerinde zorunlu kabul kriteri olarak uygulanır.
 
 ## Güncel Durum
 
-**Aktif Faz**: Faz 4 — Review, Validasyon ve Context Yönetimi  
-**Son Güncelleme**: Faz 3 tamamlandı, Faz 4 başlatıldı  
-**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri; Faz 2 — LangGraph Core: State ve Graph Yapısı; Faz 3 — Dinamik Worker Sistemi ve Bağımlılık Yönetimi
+**Aktif Faz**: Faz 5 — CLI Arayüzü  
+**Son Güncelleme**: Faz 4 tamamlandı, Faz 5 başlatıldı  
+**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri; Faz 2 — LangGraph Core: State ve Graph Yapısı; Faz 3 — Dinamik Worker Sistemi ve Bağımlılık Yönetimi; Faz 4 — Review, Validasyon ve Context Yönetimi
