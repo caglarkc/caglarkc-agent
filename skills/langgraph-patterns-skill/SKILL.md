@@ -199,7 +199,10 @@ def route_after_approval(state: OrchestratorState) -> str:
     return "dispatcher"
 
 def route_after_worker(state: OrchestratorState) -> str:
-    # Tüm dosyalar done veya failed mi?
+    # Kapsam değişikliği varsa planner'a dön, DAG yeniden hesaplanır
+    if state.get("scope_changed"):
+        return "planner"
+
     registry = state["file_registry"]
     pending = [f for f, s in registry.items() if s in ("planned", "reserved", "in_progress", "waiting")]
     if pending:
@@ -208,16 +211,126 @@ def route_after_worker(state: OrchestratorState) -> str:
 
 def route_after_review(state: OrchestratorState) -> str:
     if state["sprint_status"] == "completed":
-        # Proje bitti mi?
         if all_sprints_done(state):
             return END
         return "planner"  # Sonraki sprint
     elif state["sprint_status"] == "revision_needed":
         if state["review_cycles"] >= 3:
-            # Max döngü aşıldı, kullanıcıya bildir
-            return "notify_user"
+            return "notify_user"  # Max döngü aşıldı, kullanıcıya bildir
         return "dispatcher"  # Sadece hatalı dosyaları tekrar kuyruğa at
     return END  # failed
+```
+
+---
+
+## Deadlock Tespiti (Dispatcher Node)
+
+Queue'da iş var ama hiçbiri atanamıyorsa ve tüm worker'lar "waiting"/"idle" durumundaysa bağımlılık döngüsü var demektir:
+
+```python
+# src/graph/nodes/dispatcher.py
+
+async def dispatcher_node(state: OrchestratorState) -> dict:
+    queue = state["worker_queue"]
+    worker_status = state["worker_status"]
+
+    # Heartbeat — 60 saniyede bir (çağrıldığında emit edilir)
+    await EventBus().emit("system.heartbeat", {"sprint": state["current_sprint"]})
+
+    # Bağımlılıkları karşılanmış, atanabilir işleri bul
+    assignable = [
+        job for job in queue
+        if job.get("assigned_to") is None
+        and all(state["file_registry"].get(d) == "done"
+                for d in state["dependencies"].get(job["file"], []))
+    ]
+
+    # Deadlock kontrolü
+    all_idle = all(s in ("waiting", "idle") for s in worker_status.values())
+    if queue and not assignable and all_idle:
+        await EventBus().emit("error.deadlock_detected", {
+            "sprint": state["current_sprint"],
+            "blocked_files": [job["file"] for job in queue],
+            "message": "Bağımlılık döngüsü tespit edildi. Manuel müdahale gerekiyor."
+        })
+        return {
+            "sprint_status": "failed",
+            "errors": state["errors"] + [{"type": "deadlock", "sprint": state["current_sprint"]}]
+        }
+
+    # Normal atama — idle worker'lara iş ver
+    return assign_jobs_to_idle_workers(state, assignable)
+```
+
+---
+
+## Scope Change Akışı
+
+Kullanıcı sprint aktifken yeni gereksinim eklerse, graph state güncellenir ve bir sonraki dispatcher çalışmasında planner'a yönlendirilir:
+
+```python
+# Telegram/CLI handler → EventBus → GraphManager
+async def handle_scope_change(thread_id: str, new_requirement: str):
+    config = {"configurable": {"thread_id": thread_id}}
+    current_state = await graph.aget_state(config)
+    existing_task = current_state.values["task_description"]
+    await graph.aupdate_state(config, {
+        "scope_changed": True,
+        "task_description": existing_task + f"\n\nEk gereksinim: {new_requirement}"
+    })
+
+# Planner node her çalışmada scope_changed flag'ini sıfırlar
+async def planner_node(state: OrchestratorState) -> dict:
+    context = await ContextBuilder().build(state["project_id"])
+    # ... Gemini plan üretimi ...
+    return {
+        "file_registry": updated_registry,
+        "dependencies": updated_dependencies,
+        "worker_queue": updated_queue,
+        "scope_changed": False,  # Flag sıfırla
+        "context_summary": context
+    }
+```
+
+---
+
+## Validator Kapsamı (MVP)
+
+İlk aşamada sadece Python desteklenir. Diğer diller Faz 5'e ertelendi.
+
+```python
+# src/graph/nodes/validator.py
+
+async def validator_node(state: OrchestratorState) -> dict:
+    errors = []
+    done_files = [f for f, s in state["file_registry"].items() if s == "done"]
+
+    for filepath in done_files:
+        if not filepath.endswith(".py"):
+            continue  # Python dışı dosyalar bu aşamada atlanır
+
+        # Syntax kontrolü
+        try:
+            import py_compile
+            py_compile.compile(filepath, doraise=True)
+        except py_compile.PyCompileError as e:
+            errors.append({"file": filepath, "type": "syntax", "detail": str(e)})
+            continue
+
+        # Temel import varlık kontrolü
+        content = Path(filepath).read_text()
+        for line in content.splitlines():
+            if line.startswith("from ") or line.startswith("import "):
+                module = extract_module_name(line)
+                if not is_stdlib_or_installed(module):
+                    errors.append({"file": filepath, "type": "import", "detail": f"{module} bulunamadı"})
+
+    if errors:
+        return {
+            "errors": state["errors"] + errors,
+            "sprint_status": "revision_needed"
+        }
+    return {}  # Hata yok, reviewer'a geç
 ```
 
 ---
