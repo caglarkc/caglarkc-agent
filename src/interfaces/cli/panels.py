@@ -37,11 +37,16 @@ class SprintStatusPanel(Static):
             table.add_row("Sprint", str(state.get("current_sprint", 0)))
             table.add_row("Status", str(state.get("sprint_status", "unknown")))
             table.add_row("Type", str(state.get("sprint_type", "unknown")))
+            table.add_row("Planning", str(state.get("planning_status", "unknown")))
             awaiting = state.get("awaiting_approval")
             table.add_row("Onay bekliyor", "evet" if awaiting else "hayır")
             file_registry = state.get("file_registry", {})
             files = ", ".join(f"{path}:{status}" for path, status in file_registry.items()) or "none"
             table.add_row("Files", files)
+            manager_reply = str(state.get("manager_reply", "") or "")
+            if len(manager_reply) > 140:
+                manager_reply = manager_reply[:137] + "..."
+            table.add_row("Manager", manager_reply or "—")
         return Panel(table, title="Sprint State", border_style="cyan")
 
     def update_state(self, state: dict[str, Any] | None) -> None:

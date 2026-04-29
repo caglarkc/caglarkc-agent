@@ -17,6 +17,8 @@ class TelegramNotifier:
 
     async def subscribe(self) -> None:
         for event_name in [
+            "manager.reply",
+            "plan.draft_updated",
             "plan.approval_needed",
             "sprint.completed",
             "sprint.revision_needed",
@@ -39,6 +41,14 @@ class TelegramNotifier:
 
     def message_for_event(self, event_type: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         body = payload.get("payload", {})
+        if event_type == "manager.reply":
+            return (str(body.get("reply_text", "Manager replied.")), {})
+        if event_type == "plan.draft_updated":
+            files = body.get("files") or []
+            return (
+                f"Plan taslagi guncellendi\nOzet: {body.get('summary', 'taslak')}\nDosyalar: {', '.join(files[:6])}",
+                {},
+            )
         if event_type == "plan.approval_needed":
             approval_id = body.get("approval_id", "unknown")
             approval_type = body.get("approval_type", "plan")

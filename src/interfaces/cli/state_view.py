@@ -24,6 +24,7 @@ def format_status_summary(state: dict[str, Any] | None, *, active_approval: dict
     lines = [
         f"Project: {state.get('project_name', 'unknown')}",
         f"Sprint: {state.get('current_sprint', 0)} | Type: {state.get('sprint_type', 'unknown')} | Status: {state.get('sprint_status', 'unknown')}",
+        f"Planning: {state.get('planning_status', 'unknown')}",
         f"Queue: {len(queue)} | Active Assignment: {bool(state.get('active_assignment'))}",
         "Workers: " + (", ".join(f"{worker}={status}" for worker, status in worker_status.items()) or "none"),
         f"Last Heartbeat: {_age_text(state.get('last_heartbeat_at'))}",
@@ -33,6 +34,9 @@ def format_status_summary(state: dict[str, Any] | None, *, active_approval: dict
         lines.append(
             f"Approval: {active_approval.get('approval_id')} | Type: {active_approval.get('approval_type')} | Status: {active_approval.get('status')}"
         )
+    manager_reply = str(state.get("manager_reply", "") or "")
+    if manager_reply:
+        lines.append(f"Manager: {manager_reply[:180]}")
     return "\n".join(lines)
 
 

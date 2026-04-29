@@ -98,10 +98,14 @@ class GraphManager:
 
         payload = envelope.payload or {}
         task_description = payload.get("task_description")
-        if not isinstance(task_description, str) or not task_description.strip():
+        execution_requested = bool(payload.get("execution_requested"))
+        if isinstance(task_description, str):
+            task_description = task_description.strip()
+        else:
+            task_description = ""
+        if not task_description and not execution_requested:
             LOGGER.warning("task.received ignored (missing task_description)")
             return
-        task_description = task_description.strip()
 
         project_id = envelope.project_id
         if not project_id:
@@ -149,17 +153,37 @@ class GraphManager:
             )
             return
 
-        thread_id = f"thread-{uuid4().hex}"
-        config = build_thread_config(thread_id)
-        self.register_project_thread(project_id, thread_id, config)
-        initial = build_initial_state(
-            project_name=project.name,
-            task_description=task_description,
-            project_id=project_id,
-            current_thread_id=thread_id,
+        existing_state = await self.state_manager.get(project_id, {})
+        if not isinstance(existing_state, dict):
+            existing_state = {}
+        thread_id = (
+            existing_state.get("planning_thread_id")
+            or existing_state.get("current_thread_id")
+            or envelope.thread_id
+            or f"thread-{uuid4().hex}"
         )
+        config = self._thread_configs.get(thread_id) or build_thread_config(thread_id)
+        self.register_project_thread(project_id, thread_id, config)
         try:
-            await self.graph.ainvoke(initial, config=config)
+            if existing_state and self.project_id_for_thread(thread_id) == project_id:
+                state_update = {
+                    "task_description": task_description or existing_state.get("task_description", ""),
+                    "execution_requested": execution_requested,
+                    "planning_thread_id": thread_id,
+                    "current_thread_id": thread_id,
+                }
+                await self.graph.aupdate_state(config, state_update, as_node="planner")
+                await self.graph.ainvoke(Command(goto="planner"), config=config)
+            else:
+                initial = build_initial_state(
+                    project_name=project.name,
+                    task_description=task_description,
+                    project_id=project_id,
+                    current_thread_id=thread_id,
+                )
+                initial["execution_requested"] = execution_requested
+                initial["planning_thread_id"] = thread_id
+                await self.graph.ainvoke(initial, config=config)
             snapshot = await self.graph.aget_state(config)
             values = dict(snapshot.values)
             await self.state_manager.set(project_id, values)
@@ -267,6 +291,20 @@ class GraphManager:
             "recovered_threads": recovered_threads,
             "orphan_cleanup_count": orphan_cleanup,
         }
+        snapshot = await self.state_manager.snapshot()
+        for project_id, state in snapshot.items():
+            if not isinstance(state, dict):
+                continue
+            approval_payload = state.get("approval_request")
+            thread_id = state.get("planning_thread_id") or state.get("current_thread_id")
+            if project_id and thread_id:
+                self.register_project_thread(project_id, thread_id, self._thread_configs.get(thread_id))
+            if isinstance(approval_payload, dict):
+                try:
+                    approval_request = ApprovalRequest.model_validate(approval_payload)
+                except ValidationError:
+                    continue
+                await self.register_approval(approval_request)
         if recovered_threads or orphan_cleanup:
             await self.event_bus.emit(
                 "system.recovered",
@@ -471,6 +509,8 @@ class GraphManager:
                 "approval_type": "",
                 "active_approval_id": None,
                 "approval_request": None,
+                "planning_status": "approved_for_execution",
+                "execution_requested": False,
                 "messages": [*snapshot.values.get("messages", []), f"approval accepted for {decision.approval_id}"],
             },
             as_node="planner",
@@ -504,6 +544,8 @@ class GraphManager:
                 "approval_type": "",
                 "active_approval_id": None,
                 "approval_request": None,
+                "planning_status": terminal_status,
+                "execution_requested": False,
                 "sprint_status": "fail",
                 "errors": [*snapshot.values.get("errors", []), {"type": terminal_status, "approval_id": decision.approval_id}],
                 "messages": [*snapshot.values.get("messages", []), f"approval {terminal_status} for {decision.approval_id}"],

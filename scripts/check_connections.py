@@ -82,13 +82,13 @@ async def check_ollama() -> CheckResult:
     return CheckResult("Ollama", True, f"LangChain adapter yanit verdi: {content or 'bos-icerik'}")
 
 
-async def check_openrouter(api_key: str, label: str) -> CheckResult:
+async def check_openrouter(api_key: str, label: str, model_name: str) -> CheckResult:
     settings = get_settings()
     if not api_key:
         return CheckResult(label, False, f"{label} env key eksik.")
     try:
         model = ChatOpenAI(
-            model=settings.openrouter_model,
+            model=model_name,
             api_key=api_key,
             base_url=settings.openrouter_base_url,
             temperature=0,
@@ -206,8 +206,22 @@ async def run_checks() -> list[CheckResult]:
     checks = [
         ("Gemini", check_gemini),
         ("Ollama", check_ollama),
-        ("OpenRouter Primary", lambda: check_openrouter(settings.openrouter_api_key_primary, "OpenRouter Primary")),
-        ("OpenRouter Secondary", lambda: check_openrouter(settings.openrouter_api_key_secondary, "OpenRouter Secondary")),
+        (
+            "OpenRouter Primary",
+            lambda: check_openrouter(
+                settings.openrouter_api_key_primary,
+                "OpenRouter Primary",
+                settings.openrouter_model,
+            ),
+        ),
+        (
+            "OpenRouter Secondary",
+            lambda: check_openrouter(
+                settings.openrouter_api_key_secondary,
+                "OpenRouter Secondary",
+                settings.openrouter_model_secondary,
+            ),
+        ),
     ]
 
     for name, check in checks:

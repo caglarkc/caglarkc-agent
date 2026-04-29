@@ -14,6 +14,7 @@ from src.interfaces.cli.state_view import format_project_history, format_project
 HELP_TEXT = "\n".join(
     [
         "/task <metin>",
+        "/apply [istege bagli not]",
         "/status",
         "/approve [approval_id]  (yalnızca olay günlüğünde plan onayı istendiğinde veya Approval panelde ID varken)",
         "/reject [approval_id] [reason]",
@@ -85,6 +86,21 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
             ).model_dump(),
         )
         return CommandOutcome(ok=True, message=f"Task queued: {task_text}")
+    if command.name == "apply":
+        state = context.current_state or {}
+        active_project = await ProjectManager().active_project()
+        task_text = " ".join(command.args).strip() or state.get("task_description") or "apply current draft"
+        await context.event_bus.publish(
+            "task.received",
+            new_event(
+                "task.received",
+                payload={"task_description": task_text, "execution_requested": True},
+                project_id=(active_project.project_id if active_project else state.get("project_id")),
+                thread_id=state.get("current_thread_id"),
+                correlation_id=(active_project.project_id if active_project else state.get("project_id")),
+            ).model_dump(),
+        )
+        return CommandOutcome(ok=True, message="Current draft sent for execution review.")
     if command.name == "status":
         return CommandOutcome(
             ok=True,

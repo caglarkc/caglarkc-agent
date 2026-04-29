@@ -41,6 +41,10 @@ class Settings(BaseSettings):
         alias="GEMINI_BASE_URL",
     )
     gemini_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODEL")
+    manager_use_gemini: bool = Field(default=True, alias="MANAGER_USE_GEMINI")
+    manager_model: str = Field(default="gemini-2.0-flash", alias="MANAGER_MODEL")
+    manager_max_history_turns: int = Field(default=12, alias="MANAGER_MAX_HISTORY_TURNS")
+    use_legacy_planner: bool = Field(default=False, alias="USE_LEGACY_PLANNER")
 
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="qwen2.5:latest", alias="OLLAMA_MODEL")
@@ -50,8 +54,10 @@ class Settings(BaseSettings):
         alias="OPENROUTER_BASE_URL",
     )
     openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
+    openrouter_model_secondary: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL_SECONDARY")
     openrouter_api_key_primary: str = Field(default="", alias="OPENROUTER_API_KEY_PRIMARY")
     openrouter_api_key_secondary: str = Field(default="", alias="OPENROUTER_API_KEY_SECONDARY")
+    worker_use_stub: bool = Field(default=False, alias="WORKER_USE_STUB")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
 

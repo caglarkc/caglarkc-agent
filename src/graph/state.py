@@ -34,6 +34,12 @@ class OrchestratorState(TypedDict, total=False):
     approval_type: str
     active_approval_id: str | None
     context_summary: str
+    manager_reply: str | None
+    draft_plan: dict[str, Any] | None
+    conversation_history: list[dict[str, Any]]
+    planning_status: str
+    execution_requested: bool
+    planning_thread_id: str | None
     scope_changed: bool
     errors: list[dict[str, Any]]
     messages: list[str]
@@ -79,6 +85,12 @@ def build_initial_state(
         "approval_type": "",
         "active_approval_id": None,
         "context_summary": "",
+        "manager_reply": None,
+        "draft_plan": None,
+        "conversation_history": [],
+        "planning_status": "idle",
+        "execution_requested": False,
+        "planning_thread_id": current_thread_id,
         "scope_changed": False,
         "errors": [],
         "messages": [],
