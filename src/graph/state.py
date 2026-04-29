@@ -11,6 +11,9 @@ class QueueEntry(TypedDict, total=False):
     assignment: dict[str, Any]
     status: str
     validation_error: str | None
+    retry_count: int
+    blocked_by: list[str]
+    task_type: str
 
 
 class OrchestratorState(TypedDict, total=False):
@@ -35,10 +38,16 @@ class OrchestratorState(TypedDict, total=False):
     errors: list[dict[str, Any]]
     messages: list[str]
     active_assignment: dict[str, Any] | None
+    active_assignments: dict[str, dict[str, Any]]
     approval_request: dict[str, Any] | None
     validation_issues: list[dict[str, Any]]
     revision_tasks: list[dict[str, Any]]
     current_thread_id: str
+    contract_completed: bool
+    plan_version: int
+    blocked_reasons: list[dict[str, Any]]
+    reservation_conflicts: list[dict[str, Any]]
+    last_scope_change: dict[str, Any] | None
 
 
 def build_initial_state(
@@ -55,9 +64,9 @@ def build_initial_state(
         "worker_queue": [],
         "dependencies": {},
         "file_registry": {},
-        "worker_status": {"worker_a": "idle"},
-        "worker_outputs": {"worker_a": []},
-        "worker_failure_log": {"worker_a": []},
+        "worker_status": {"worker_a": "idle", "worker_b": "idle", "worker_c": "idle"},
+        "worker_outputs": {"worker_a": [], "worker_b": [], "worker_c": []},
+        "worker_failure_log": {"worker_a": [], "worker_b": [], "worker_c": []},
         "current_sprint": 1,
         "sprint_type": "feature",
         "sprint_status": "planning",
@@ -70,8 +79,14 @@ def build_initial_state(
         "errors": [],
         "messages": [],
         "active_assignment": None,
+        "active_assignments": {},
         "approval_request": None,
         "validation_issues": [],
         "revision_tasks": [],
         "current_thread_id": current_thread_id,
+        "contract_completed": False,
+        "plan_version": 1,
+        "blocked_reasons": [],
+        "reservation_conflicts": [],
+        "last_scope_change": None,
     }

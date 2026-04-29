@@ -37,6 +37,7 @@ class Repository:
                     number INTEGER NOT NULL,
                     sprint_type TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    plan_version INTEGER NOT NULL,
                     review_cycles INTEGER NOT NULL,
                     files_written_json TEXT NOT NULL,
                     decisions_json TEXT NOT NULL,
@@ -52,6 +53,9 @@ class Repository:
                     status TEXT NOT NULL,
                     worker_id TEXT,
                     checksum TEXT,
+                    attempt_count INTEGER NOT NULL,
+                    last_error TEXT,
+                    reservation_owner TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -70,10 +74,41 @@ class Repository:
                     worker_id TEXT NOT NULL,
                     task_type TEXT NOT NULL,
                     error_message TEXT NOT NULL,
+                    retryable INTEGER NOT NULL,
+                    retry_count INTEGER NOT NULL,
+                    recommendation TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
                 """
             )
+            await connection.execute("ALTER TABLE sprints ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 1")
+        except aiosqlite.OperationalError:
+            pass
+        async with aiosqlite.connect(self._db_path) as connection:
+            try:
+                await connection.execute("ALTER TABLE file_records ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
+            except aiosqlite.OperationalError:
+                pass
+            try:
+                await connection.execute("ALTER TABLE file_records ADD COLUMN last_error TEXT")
+            except aiosqlite.OperationalError:
+                pass
+            try:
+                await connection.execute("ALTER TABLE file_records ADD COLUMN reservation_owner TEXT")
+            except aiosqlite.OperationalError:
+                pass
+            try:
+                await connection.execute("ALTER TABLE worker_failure_logs ADD COLUMN retryable INTEGER NOT NULL DEFAULT 1")
+            except aiosqlite.OperationalError:
+                pass
+            try:
+                await connection.execute("ALTER TABLE worker_failure_logs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 1")
+            except aiosqlite.OperationalError:
+                pass
+            try:
+                await connection.execute("ALTER TABLE worker_failure_logs ADD COLUMN recommendation TEXT NOT NULL DEFAULT ''")
+            except aiosqlite.OperationalError:
+                pass
             await connection.commit()
 
     async def upsert_project(self, project: Project) -> None:
@@ -155,6 +190,7 @@ class Repository:
                 "number": sprint.number,
                 "sprint_type": sprint.sprint_type,
                 "status": sprint.status,
+                "plan_version": sprint.plan_version,
                 "review_cycles": sprint.review_cycles,
                 "files_written_json": json.dumps(sprint.files_written),
                 "decisions_json": json.dumps(sprint.decisions),
@@ -176,6 +212,7 @@ class Repository:
                 number=row["number"],
                 sprint_type=row["sprint_type"],
                 status=row["status"],
+                plan_version=row["plan_version"],
                 review_cycles=row["review_cycles"],
                 files_written=json.loads(row["files_written_json"]),
                 decisions=json.loads(row["decisions_json"]),
@@ -192,12 +229,24 @@ class Repository:
             payload=file_record.model_dump(),
         )
 
+    async def upsert_file_record(self, file_record: FileRecord) -> None:
+        await self.create_file_record(file_record)
+
     async def list_file_records(self, project_id: str) -> list[FileRecord]:
         rows = await self._fetch_all(
             "SELECT * FROM file_records WHERE project_id = ? ORDER BY created_at ASC",
             (project_id,),
         )
         return [FileRecord(**dict(row)) for row in rows]
+
+    async def get_file_record(self, project_id: str, path: str) -> FileRecord | None:
+        rows = await self._fetch_all(
+            "SELECT * FROM file_records WHERE project_id = ? AND path = ? ORDER BY updated_at DESC LIMIT 1",
+            (project_id, path),
+        )
+        if not rows:
+            return None
+        return FileRecord(**dict(rows[0]))
 
     async def create_decision(self, decision: Decision) -> None:
         await self._insert_model(table="decisions", payload=decision.model_dump())
@@ -228,6 +277,31 @@ class Repository:
             (project_id, limit),
         )
         return [WorkerFailureLog(**dict(row)) for row in rows]
+
+    async def update_sprint_status(
+        self,
+        project_id: str,
+        sprint_number: int,
+        *,
+        status: str,
+        review_cycles: int | None = None,
+        revision_note: str | None = None,
+    ) -> None:
+        sprints = await self.list_sprints(project_id)
+        target = next((item for item in sprints if item.number == sprint_number), None)
+        if target is None:
+            return
+        notes = list(target.revision_notes)
+        if revision_note:
+            notes.append(revision_note)
+        updated = target.model_copy(
+            update={
+                "status": status,
+                "review_cycles": review_cycles if review_cycles is not None else target.review_cycles,
+                "revision_notes": notes,
+            }
+        )
+        await self.create_sprint(updated)
 
     async def _insert_model(self, table: str, payload: dict[str, Any]) -> None:
         columns = list(payload.keys())

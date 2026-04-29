@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
+from uuid import uuid4
 
 from src.core.contracts import DispatchAssignment, new_event
 from src.core.event_bus import EventBus
 from src.core.project_manager import ProjectManager
+from src.core.retry_policy import RetryPolicy, classify_error
 from src.core.state_transaction import StateTransaction
+from src.storage.models import FileRecord, WorkerFailureLog
+from src.storage.repository import Repository
 
 
 def _render_file_content(target_file: str) -> str:
+    if target_file == "api_contract.json":
+        return '{\n  "version": "1.0.0",\n  "endpoints": []\n}\n'
+    if target_file == "shared_types.py":
+        return (
+            "from dataclasses import dataclass\n\n"
+            "@dataclass\n"
+            "class SharedPayload:\n"
+            "    name: str\n"
+        )
+    if target_file == "src/__init__.py":
+        return '"""Contract scaffold package."""\n'
     if target_file == "helpers.py":
         return (
             "def helper() -> str:\n"
@@ -24,6 +40,8 @@ def _render_file_content(target_file: str) -> str:
 
 
 async def worker_node(state: dict) -> dict:
+    repository = Repository()
+    await repository.initialize()
     active_assignment = state.get("active_assignment")
     if active_assignment is None:
         return {
@@ -37,21 +55,49 @@ async def worker_node(state: dict) -> dict:
     worker_status = deepcopy(state.get("worker_status", {}))
     worker_outputs = deepcopy(state.get("worker_outputs", {}))
     worker_failure_log = deepcopy(state.get("worker_failure_log", {}))
+    reservation_conflicts = deepcopy(state.get("reservation_conflicts", []))
     target_file = assignment.target_file
     worker_id = assignment.worker_id
+    task_entry = next((item for item in queue if item["assignment"]["task_id"] == assignment.task_id), None)
+    retry_count = int(task_entry.get("retry_count", 0)) if task_entry else 0
+    file_record = await repository.get_file_record(project_id, target_file)
+
+    if file_registry.get(target_file) != "reserved" or (file_record and file_record.reservation_owner not in {None, worker_id}):
+        reservation_conflicts.append(
+            {
+                "target_file": target_file,
+                "worker_id": worker_id,
+                "reason": "reservation mismatch",
+            }
+        )
+        return {
+            "reservation_conflicts": reservation_conflicts,
+            "errors": [*state.get("errors", []), {"type": "reservation_conflict", "target_file": target_file}],
+            "messages": [*state.get("messages", []), f"worker rejected conflicting write for {target_file}"],
+        }
 
     try:
         file_registry[target_file] = "in_progress"
         worker_status[worker_id] = "working"
+        if task_entry is not None:
+            task_entry["status"] = "in_progress"
         async with StateTransaction(project_id) as transaction:
             persisted = transaction.state
             persisted.update(
                 {
                     "file_registry": file_registry,
                     "worker_status": worker_status,
+                    "worker_queue": queue,
                 }
             )
             transaction.state = persisted
+
+        simulated_error = assignment.metadata.get("simulate_error")
+        if simulated_error:
+            if simulated_error == "retryable":
+                timeout_error = asyncio.TimeoutError("simulated timeout")
+                raise timeout_error
+            raise ValueError("simulated permanent failure")
 
         await ProjectManager().write_project_file(
             state["project_name"],
@@ -66,6 +112,18 @@ async def worker_node(state: dict) -> dict:
         file_registry[target_file] = "done"
         worker_status[worker_id] = "idle"
         worker_outputs.setdefault(worker_id, []).append(target_file)
+        await repository.upsert_file_record(
+            FileRecord(
+                file_id=file_record.file_id if file_record else str(uuid4()),
+                project_id=project_id,
+                sprint_id=assignment.sprint_id,
+                path=target_file,
+                status="done",
+                worker_id=worker_id,
+                attempt_count=retry_count + 1,
+                reservation_owner=worker_id,
+            )
+        )
 
         await EventBus().emit(
             "sprint.worker_done",
@@ -88,34 +146,93 @@ async def worker_node(state: dict) -> dict:
             "worker_status": worker_status,
             "worker_outputs": worker_outputs,
             "active_assignment": None,
+            "contract_completed": state.get("contract_completed", False)
+            or (state.get("sprint_type") == "contract" and all(status == "done" for status in file_registry.values())),
             "messages": [*state.get("messages", []), f"worker completed {target_file}"],
         }
     except Exception as exc:
+        classification = classify_error(exc)
+        retry_count += 1
         for item in queue:
             if item["assignment"]["task_id"] == assignment.task_id:
-                item["status"] = "failed"
+                if classification.retryable and retry_count < RetryPolicy().max_retry:
+                    item["status"] = "planned"
+                    next_worker = next(
+                        (
+                            candidate
+                            for candidate, status in worker_status.items()
+                            if candidate not in {worker_id} and status == "idle"
+                        ),
+                        worker_id,
+                    )
+                    item["assignment"]["worker_id"] = next_worker
+                else:
+                    item["status"] = "failed"
                 item["validation_error"] = str(exc)
+                item["retry_count"] = retry_count
                 break
-        file_registry[target_file] = "failed"
+        file_registry[target_file] = "planned" if classification.retryable and retry_count < RetryPolicy().max_retry else "failed"
         worker_status[worker_id] = "idle"
         worker_failure_log.setdefault(worker_id, []).append(
             {
                 "task_id": assignment.task_id,
                 "target_file": target_file,
                 "error": str(exc),
+                "retryable": classification.retryable,
+                "retry_count": retry_count,
+                "task_type": assignment.metadata.get("task_type", target_file),
             }
         )
+        await repository.upsert_file_record(
+            FileRecord(
+                file_id=file_record.file_id if file_record else str(uuid4()),
+                project_id=project_id,
+                sprint_id=assignment.sprint_id,
+                path=target_file,
+                status=file_registry[target_file],
+                worker_id=worker_id,
+                attempt_count=retry_count,
+                last_error=str(exc),
+                reservation_owner=worker_id,
+            )
+        )
+        await repository.create_worker_failure(
+            WorkerFailureLog(
+                failure_id=str(uuid4()),
+                project_id=project_id,
+                sprint_id=assignment.sprint_id,
+                worker_id=worker_id,
+                task_type=assignment.metadata.get("task_type", target_file),
+                error_message=str(exc),
+                retryable=classification.retryable,
+                retry_count=retry_count,
+                recommendation="reassign to alternate worker" if classification.retryable else "fix input or contract before retry",
+            )
+        )
+        errors = [*state.get("errors", []), {"type": "worker_failure", "target_file": target_file, "error": str(exc)}]
+        messages = [*state.get("messages", []), f"worker failed {target_file}"]
+        if not classification.retryable or retry_count >= RetryPolicy().max_retry:
+            await EventBus().emit(
+                "worker.failed",
+                new_event(
+                    "worker.failed",
+                    payload={"task_id": assignment.task_id, "target_file": target_file, "retry_count": retry_count},
+                    project_id=project_id,
+                    thread_id=assignment.thread_id,
+                    sprint_id=assignment.sprint_id,
+                    correlation_id=assignment.task_id,
+                ).model_dump(),
+            )
+            messages.append(f"worker exhausted retries for {target_file}")
         updates = {
             "worker_queue": queue,
             "file_registry": file_registry,
             "worker_status": worker_status,
             "worker_failure_log": worker_failure_log,
             "active_assignment": None,
-            "errors": [
-                *state.get("errors", []),
-                {"type": "worker_failure", "target_file": target_file, "error": str(exc)},
-            ],
-            "messages": [*state.get("messages", []), f"worker failed {target_file}"],
+            "errors": errors,
+            "messages": messages,
+            "sprint_status": "revision" if classification.retryable and retry_count < RetryPolicy().max_retry else "fail",
         }
 
     async with StateTransaction(project_id) as transaction:

@@ -26,6 +26,7 @@ class Sprint(BaseModel):
     number: int
     sprint_type: str
     status: str = "planning"
+    plan_version: int = 1
     review_cycles: int = 0
     files_written: list[str] = Field(default_factory=list)
     decisions: list[str] = Field(default_factory=list)
@@ -42,6 +43,9 @@ class FileRecord(BaseModel):
     status: str = "planned"
     worker_id: str | None = None
     checksum: str | None = None
+    attempt_count: int = 0
+    last_error: str | None = None
+    reservation_owner: str | None = None
     created_at: str = Field(default_factory=utc_now)
     updated_at: str = Field(default_factory=utc_now)
 
@@ -62,4 +66,7 @@ class WorkerFailureLog(BaseModel):
     worker_id: str
     task_type: str
     error_message: str
+    retryable: bool = True
+    retry_count: int = 1
+    recommendation: str = ""
     created_at: str = Field(default_factory=utc_now)
