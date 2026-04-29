@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import aiofiles.os
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -26,7 +27,7 @@ def build_graph(checkpointer: AsyncSqliteSaver):
 
 async def run_minimal_graph() -> dict:
     settings = get_settings()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    await aiofiles.os.makedirs(settings.data_dir, exist_ok=True)
 
     async with AsyncSqliteSaver.from_conn_string(str(settings.graph_checkpoint_path)) as checkpointer:
         graph = build_graph(checkpointer)
