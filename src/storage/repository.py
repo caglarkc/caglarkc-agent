@@ -8,7 +8,7 @@ import aiosqlite
 import aiofiles.os
 
 from src.config.settings import get_settings
-from src.storage.models import Decision, FileRecord, Project, Sprint, WorkerFailureLog
+from src.storage.models import Decision, FileRecord, Project, ProjectSummary, Sprint, WorkerFailureLog
 
 
 class Repository:
@@ -160,6 +160,24 @@ class Repository:
             metadata=json.loads(row["metadata_json"]),
         )
 
+    async def get_project_by_name(self, name: str) -> Project | None:
+        rows = await self._fetch_all(
+            "SELECT * FROM projects WHERE lower(name) = lower(?) ORDER BY created_at ASC LIMIT 1",
+            (name,),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return Project(
+            project_id=row["project_id"],
+            name=row["name"],
+            description=row["description"],
+            status=row["status"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            metadata=json.loads(row["metadata_json"]),
+        )
+
     async def list_projects(self) -> list[Project]:
         async with aiosqlite.connect(self._db_path) as connection:
             connection.row_factory = aiosqlite.Row
@@ -177,6 +195,46 @@ class Repository:
             )
             for row in rows
         ]
+
+    async def list_projects_by_status(self, statuses: list[str]) -> list[Project]:
+        if not statuses:
+            return []
+        placeholders = ", ".join("?" for _ in statuses)
+        rows = await self._fetch_all(
+            f"SELECT * FROM projects WHERE status IN ({placeholders}) ORDER BY created_at ASC",
+            statuses,
+        )
+        return [
+            Project(
+                project_id=row["project_id"],
+                name=row["name"],
+                description=row["description"],
+                status=row["status"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                metadata=json.loads(row["metadata_json"]),
+            )
+            for row in rows
+        ]
+
+    async def set_project_status(self, project_id: str, status: str, *, metadata_updates: dict[str, Any] | None = None) -> None:
+        project = await self.get_project(project_id)
+        if project is None:
+            return
+        metadata = dict(project.metadata)
+        if metadata_updates:
+            metadata.update(metadata_updates)
+        await self.upsert_project(
+            project.model_copy(
+                update={
+                    "status": status,
+                    "updated_at": Project().utc_now() if False else get_settings().app_name and project.updated_at,
+                }
+            )
+        )
+
+    async def update_project(self, project: Project) -> None:
+        await self.upsert_project(project)
 
     async def delete_project(self, project_id: str) -> None:
         async with aiosqlite.connect(self._db_path) as connection:
@@ -279,6 +337,64 @@ class Repository:
             (project_id, limit),
         )
         return [WorkerFailureLog(**dict(row)) for row in rows]
+
+    async def list_all_worker_failures(self, project_id: str) -> list[WorkerFailureLog]:
+        rows = await self._fetch_all(
+            """
+            SELECT * FROM worker_failure_logs
+            WHERE project_id = ?
+            ORDER BY created_at DESC
+            """,
+            (project_id,),
+        )
+        return [WorkerFailureLog(**dict(row)) for row in rows]
+
+    async def project_summary(self, project_id: str) -> ProjectSummary | None:
+        project = await self.get_project(project_id)
+        if project is None:
+            return None
+        sprints = await self.list_sprints(project_id)
+        file_records = await self.list_file_records(project_id)
+        failures = await self.list_all_worker_failures(project_id)
+        total_files_written = len({record.path for record in file_records if record.status == "done"})
+        timestamps = [sprint.started_at for sprint in sprints if sprint.started_at]
+        timestamps.extend(sprint.completed_at for sprint in sprints if sprint.completed_at)
+        total_duration_seconds = 0
+        if timestamps:
+            started = min(item for item in timestamps if item)
+            ended = max(item for item in timestamps if item)
+            total_duration_seconds = int(
+                (
+                    __import__("datetime").datetime.fromisoformat(ended)
+                    - __import__("datetime").datetime.fromisoformat(started)
+                ).total_seconds()
+            )
+        worker_totals: dict[str, int] = {}
+        worker_successes: dict[str, int] = {}
+        retry_attempts = 0
+        for record in file_records:
+            if record.worker_id:
+                worker_totals[record.worker_id] = worker_totals.get(record.worker_id, 0) + 1
+                if record.status == "done":
+                    worker_successes[record.worker_id] = worker_successes.get(record.worker_id, 0) + 1
+            retry_attempts += max(record.attempt_count - 1, 0)
+        worker_success_rates = {
+            worker_id: round(worker_successes.get(worker_id, 0) / total, 2)
+            for worker_id, total in sorted(worker_totals.items())
+            if total
+        }
+        retry_failure_rate = round((len(failures) + retry_attempts) / max(len(file_records), 1), 2)
+        return ProjectSummary(
+            project_id=project.project_id,
+            project_name=project.name,
+            status=project.status,
+            total_sprints=len(sprints),
+            total_files_written=total_files_written,
+            total_duration_seconds=total_duration_seconds,
+            worker_success_rates=worker_success_rates,
+            retry_failure_rate=retry_failure_rate,
+            archived=project.status == "archived" or bool(project.metadata.get("archived", False)),
+        )
 
     async def update_sprint_status(
         self,
