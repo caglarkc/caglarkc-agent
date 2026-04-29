@@ -96,11 +96,14 @@ class GraphManager:
     async def list_checkpoint_threads(self) -> list[str]:
         if not await aiofiles.ospath.exists(self.checkpoint_path):
             return []
-        async with aiosqlite.connect(self.checkpoint_path) as connection:
-            cursor = await connection.execute(
-                "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id ASC"
-            )
-            rows = await cursor.fetchall()
+        try:
+            async with aiosqlite.connect(self.checkpoint_path) as connection:
+                cursor = await connection.execute(
+                    "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id ASC"
+                )
+                rows = await cursor.fetchall()
+        except aiosqlite.OperationalError:
+            return []
         return [row[0] for row in rows if row and row[0]]
 
     async def recover_pending_threads(self) -> dict[str, Any]:
