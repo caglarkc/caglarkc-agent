@@ -81,9 +81,11 @@ class Repository:
                 );
                 """
             )
-            await connection.execute("ALTER TABLE sprints ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 1")
-        except aiosqlite.OperationalError:
-            pass
+            try:
+                await connection.execute("ALTER TABLE sprints ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 1")
+            except aiosqlite.OperationalError:
+                pass
+            await connection.commit()
         async with aiosqlite.connect(self._db_path) as connection:
             try:
                 await connection.execute("ALTER TABLE file_records ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0")
