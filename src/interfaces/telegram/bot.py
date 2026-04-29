@@ -48,8 +48,12 @@ class OrchestratorTelegramBot:
         await self.notifier.subscribe()
         await self.application.initialize()
         await self.application.start()
+        if getattr(self.application, "updater", None) is not None:
+            await self.application.updater.start_polling()
 
     async def shutdown(self) -> None:
+        if getattr(self.application, "updater", None) is not None:
+            await self.application.updater.stop()
         await self.application.stop()
         await self.application.shutdown()
 
