@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -102,6 +103,8 @@ async def _handle_approval_command(command: ParsedCommand, context: CommandConte
     if guard is not None:
         request = await guard.get_approval(approval_id)
         if request is None or request.status != "pending":
+            return CommandOutcome(ok=False, message=f"Approval {approval_id} is stale or expired.", level="warning")
+        if datetime.fromisoformat(request.expires_at) <= datetime.now(timezone.utc):
             return CommandOutcome(ok=False, message=f"Approval {approval_id} is stale or expired.", level="warning")
     else:
         request = None
