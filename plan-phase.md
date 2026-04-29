@@ -7,7 +7,7 @@
 
 ## Faz 1 — Altyapı ve Bağlantılar
 
-**Durum**: ⬜ Bekliyor  
+**Durum**: ✅ Tamamlandı  
 **Amaç**: Tüm AI sağlayıcıları bağla, LangGraph kurulumunu doğrula, core iskelet ve storage schema'sını hazırla.  
 **Skill**: `langgraph-patterns`, `project-architecture`
 
@@ -39,7 +39,7 @@ Gemini, Ollama ve her iki OpenRouter bağlantısı çalışıyor. LangGraph Sqli
 
 ## Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri
 
-**Durum**: ⬜ Bekliyor  
+**Durum**: 🔄 Aktif  
 **Amaç**: Graph, storage, interface ve worker davranışları için tek bir sözleşme katmanı tanımlamak.  
 **Skill**: `project-architecture`, `langgraph-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 1 tamamlanmış olmalı
@@ -370,6 +370,6 @@ Bu bölüm Faz 4-8 teslimlerinde zorunlu kabul kriteri olarak uygulanır.
 
 ## Güncel Durum
 
-**Aktif Faz**: —  
-**Son Güncelleme**: LangGraph'a geçiş kararı (CrewAI bırakıldı)  
-**Tamamlanan Faz**: Yok
+**Aktif Faz**: Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri  
+**Son Güncelleme**: Faz 1 tamamlandı, Faz 1.5 başlatıldı  
+**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar
