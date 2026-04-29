@@ -8,6 +8,7 @@ from typing import Any
 
 import aiofiles
 import aiofiles.os
+import aiofiles.ospath
 
 from src.config.settings import get_settings
 
@@ -64,7 +65,7 @@ class StateManager:
     async def load_from_disk(self, path: str | Path | None = None) -> dict[str, Any]:
         settings = get_settings()
         source = Path(path or settings.state_snapshot_path)
-        if not source.exists():
+        if not await aiofiles.ospath.exists(source):
             return {}
         async with aiofiles.open(source, "r", encoding="utf-8") as handle:
             content = await handle.read()
