@@ -8,7 +8,7 @@ import aiosqlite
 import aiofiles.os
 
 from src.config.settings import get_settings
-from src.storage.models import Decision, FileRecord, Project, ProjectSummary, Sprint, WorkerFailureLog
+from src.storage.models import Decision, FileRecord, Project, ProjectSummary, Sprint, WorkerFailureLog, utc_now
 
 
 class Repository:
@@ -224,14 +224,7 @@ class Repository:
         metadata = dict(project.metadata)
         if metadata_updates:
             metadata.update(metadata_updates)
-        await self.upsert_project(
-            project.model_copy(
-                update={
-                    "status": status,
-                    "updated_at": Project().utc_now() if False else get_settings().app_name and project.updated_at,
-                }
-            )
-        )
+        await self.upsert_project(project.model_copy(update={"status": status, "updated_at": utc_now(), "metadata": metadata}))
 
     async def update_project(self, project: Project) -> None:
         await self.upsert_project(project)
