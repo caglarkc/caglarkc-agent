@@ -97,7 +97,7 @@ KONTROL KRİTERLERİ:
 - İstenen dosyalar oluşturulmuş mu?
 - Bağımlılıklar doğru import edilmiş mi?
 - Async pattern'lar doğru mu? (`python-async-patterns` referans)
-- CrewAI kullanımı doğru mu? (`crewai-patterns` referans)
+- LangGraph node/edge yapısı doğru mu? (`langgraph-patterns` referans)
 - Hata handling var mı?
 - Bir sonraki faza bağlanabilir mi?
 
@@ -113,6 +113,6 @@ KONTROL KRİTERLERİ:
 ## References
 
 - `project-architecture/SKILL.md` — klasör yapısı, mimari kurallar
-- `crewai-patterns/SKILL.md` — CrewAI kullanım kuralları
+- `langgraph-patterns/SKILL.md` — LangGraph node, edge, state, HITL kuralları
 - `python-async-patterns/SKILL.md` — async yapı kuralları
 - `telegram-bot-patterns/SKILL.md` — Telegram entegrasyon kuralları

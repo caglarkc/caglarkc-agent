@@ -29,7 +29,7 @@ class TelegramBot:
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
 
     def _setup_bus_listeners(self):
-        # CrewAI'dan gelen event'leri Telegram'a yönlendir
+        # LangGraph node'larından gelen event'leri Telegram'a yönlendir
         self.bus.subscribe("plan.approval_needed", self.send_plan_for_approval)
         self.bus.subscribe("sprint.completed", self.send_sprint_summary)
         self.bus.subscribe("error.occurred", self.send_error_alert)
@@ -124,37 +124,35 @@ async def handle_callback(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 ---
 
-## Flow Resume
+## Graph Resume
 
-Telegram onayı gelince CrewAI Flow kaldığı yerden devam eder:
+Telegram onayı gelince LangGraph interrupted thread resume edilir:
 
 ```python
-# src/core/flow_manager.py
-from crewai.flow.persistence.sqlite import SQLiteFlowPersistence
-from src.crew.flow import OrchestratorFlow
+# src/core/graph_manager.py
+from langgraph.types import Command
+from src.core.event_bus import EventBus
 
-class FlowManager:
-    def __init__(self):
-        self.persistence = SQLiteFlowPersistence(db_path="./storage/flow_state.db")
+class GraphManager:
+    def __init__(self, graph):
+        self.graph = graph
         self.bus = EventBus()
         self.bus.subscribe("plan.approved", self.on_plan_approved)
         self.bus.subscribe("plan.rejected", self.on_plan_rejected)
 
     async def on_plan_approved(self, data: dict):
-        flow_id = data["flow_id"]
-        flow = OrchestratorFlow.from_pending(
-            flow_id=flow_id,
-            persistence=self.persistence
+        thread_id = data["thread_id"]
+        config = {"configurable": {"thread_id": thread_id}}
+        asyncio.create_task(
+            self.graph.ainvoke(Command(resume="approved"), config)
         )
-        await flow.resume(feedback="approved")
 
     async def on_plan_rejected(self, data: dict):
-        flow_id = data["flow_id"]
-        flow = OrchestratorFlow.from_pending(
-            flow_id=flow_id,
-            persistence=self.persistence
+        thread_id = data["thread_id"]
+        config = {"configurable": {"thread_id": thread_id}}
+        asyncio.create_task(
+            self.graph.ainvoke(Command(resume="rejected"), config)
         )
-        await flow.resume(feedback="rejected")
 ```
 
 ---

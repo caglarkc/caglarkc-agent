@@ -86,29 +86,22 @@ async def main():
 async def recover_pending_graphs(self):
     logger.info("Bekleyen graph thread'leri kontrol ediliyor...")
     try:
-        pending = await self.persistence.get_all_pending()
-        if not pending:
-            logger.info("Bekleyen flow yok.")
-            return
-        for flow_state in pending:
-            logger.info(f"Flow recover ediliyor: {flow_state.flow_id}")
-            asyncio.create_task(self._recover_flow(flow_state))
+        async with AsyncSqliteSaver.from_conn_string("./storage/graph.db") as checkpointer:
+            async for thread in checkpointer.alist(filter={"status": "interrupted"}):
+                thread_id = thread.config["configurable"]["thread_id"]
+                logger.info(f"Graph resume ediliyor: {thread_id}")
+                asyncio.create_task(self._recover_thread(thread_id))
     except Exception as e:
         logger.error(f"Recovery hatası: {e}")
 
-async def _recover_flow(self, flow_state):
+async def _recover_thread(self, thread_id: str):
     try:
-        flow = OrchestratorFlow.from_pending(
-            flow_id=flow_state.flow_id,
-            persistence=self.persistence
-        )
-        # Kullanıcıya bildir — sistem yeniden başladı
         await self.bus.emit("system.recovered", {
-            "flow_id": flow_state.flow_id,
+            "thread_id": thread_id,
             "message": "Sistem yeniden başladı. Onay bekleniyor."
         })
     except Exception as e:
-        logger.error(f"Flow {flow_state.flow_id} recover edilemedi: {e}")
+        logger.error(f"Thread {thread_id} recover edilemedi: {e}")
 ```
 
 ---

@@ -18,7 +18,7 @@ ai-orchestrator/
 │   │   ├── event_bus.py         # Telegram-CLI senkronizasyonu
 │   │   ├── state_manager.py     # Görev/sprint durumu
 │   │   ├── project_manager.py   # Proje dosya yönetimi
-│   │   ├── flow_manager.py      # Flow başlatma, pause, resume, crash recovery
+│   │   ├── graph_manager.py     # Graph resume, crash recovery, EventBus → LangGraph köprüsü
 │   │   └── context_builder.py   # SQLite'tan özet çekip Gemini prompt'una inject
 │   │
 │   ├── graph/                   # LangGraph katmanı
@@ -71,11 +71,11 @@ ai-orchestrator/
 
 ### `src/core/` — Çekirdek
 - Singleton pattern zorunlu
-- Hiçbir dış bağımlılık (CrewAI, Telegram) import etmez
+- Hiçbir dış bağımlılık (LangGraph, Telegram) import etmez
 - Sadece standart kütüphane + pydantic + aiosqlite kullanır
 - Tüm state buradan yönetilir, başka yerden state yazılmaz
-- `flow_manager.py`: FlowManager — flow lifecycle yönetir, SQLite persistence bağlar, EventBus'a subscribe olur
-- `context_builder.py`: ContextBuilder — her Gemini çağrısı öncesi SQLite'tan özet üretir, max 2000 token, kickoff inputs'a inject edilir
+- `graph_manager.py`: GraphManager — LangGraph thread resume/recover, EventBus `plan.approved/rejected` dinler ve `graph.ainvoke(Command(resume=...))` ile graph'ı devam ettirir. Tüm sistemin merkezi köprüsü
+- `context_builder.py`: ContextBuilder — her Gemini çağrısı öncesi SQLite'tan özet üretir, max 2000 token, öncelik hiyerarşili (mimari kararlar → son sprintler → eski detaylar)
 
 ### `src/graph/` — LangGraph Katmanı
 - Sadece LangGraph ve LangChain provider import'ları
@@ -160,6 +160,9 @@ ai-orchestrator/
   "awaiting_approval": bool,
   "approval_type": str,        # "plan" | "sprint_start" | "scope_change"
 
+  # Kapsam değişikliği
+  "scope_changed": bool,       # True olunca edge akışı planner_node'a döner, DAG yeniden hesaplanır
+
   # Context
   "context_summary": str,
 
@@ -168,6 +171,15 @@ ai-orchestrator/
   "messages": list
 }
 ```
+
+### SQLite Modelleri (`src/storage/models.py`)
+
+Temel tablolar:
+- `Project` — proje bilgisi ve durumu
+- `Sprint` — sprint geçmişi, review döngüsü, dosya listesi
+- `Decision` — alınan mimari kararlar (ContextBuilder Tier 1)
+- `WorkerFailureLog` — worker_id, task_type, error_msg, timestamp. ContextBuilder bu tablodan başarısız görev tiplerini Gemini'ye inject eder
+- `FileRecord` — hangi dosyanın hangi sprint'te kim tarafından yazıldığı
 
 ### Sprint Geçmişi (SQLite + `.meta/`)
 ```json

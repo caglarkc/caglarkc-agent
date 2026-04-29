@@ -55,7 +55,7 @@ YAPILACAKLAR: <adım listesi>
 ### Interface Katmanı (`src/interfaces/`)
 - Telegram ve CLI aynı `EventBus`'a bağlanır
 - Her interface kendi modülünde izole çalışır
-- Interface'ler direkt CrewAI Flow'a erişmez, EventBus üzerinden iletişim kurar
+- Interface'ler direkt LangGraph'a erişmez, EventBus üzerinden iletişim kurar
 - Referans: `telegram-bot-patterns/SKILL.md`
 
 ### Core Katmanı (`src/core/`)
