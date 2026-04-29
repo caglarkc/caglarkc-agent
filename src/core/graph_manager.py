@@ -41,13 +41,13 @@ class GraphManager:
         await self.approval_guard.register_approval(approval_request)
 
     async def on_plan_approved(self, raw_event: dict[str, Any]) -> None:
-        await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
+        return await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
 
     async def on_plan_rejected(self, raw_event: dict[str, Any]) -> None:
-        await self._handle_decision_event(raw_event, expected_event_type="plan.rejected")
+        return await self._handle_decision_event(raw_event, expected_event_type="plan.rejected")
 
     async def on_plan_cancelled(self, raw_event: dict[str, Any]) -> None:
-        await self._handle_decision_event(raw_event, expected_event_type="plan.cancelled")
+        return await self._handle_decision_event(raw_event, expected_event_type="plan.cancelled")
 
     async def _handle_decision_event(self, raw_event: dict[str, Any], *, expected_event_type: str) -> ApprovalConsumeResult:
         try:
