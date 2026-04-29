@@ -16,6 +16,8 @@ from src.config.settings import get_settings
 from src.core.approval_guard import ApprovalConsumeResult, ApprovalGuard
 from src.core.contracts import ApprovalDecision, ApprovalRequest, event_validation_error, new_event, validate_event
 from src.core.event_bus import EventBus
+from src.core.project_manager import ProjectManager
+from src.core.scheduler import FairScheduler, ScheduledTask
 from src.core.state_manager import StateManager
 from src.core.state_transaction import StateTransaction
 from src.graph.graph import build_thread_config, graph_runtime
@@ -40,6 +42,7 @@ class GraphManager:
         cancel_callback: ResumeCallback | None = None,
         checkpoint_path: str | Path | None = None,
         graph_runtime_factory: Callable[[str | Path | None], AbstractAsyncContextManager[Any]] = graph_runtime,
+        scheduler: FairScheduler | None = None,
     ) -> None:
         settings = get_settings()
         self.event_bus = event_bus or EventBus()
@@ -51,9 +54,13 @@ class GraphManager:
         self.cancel_callback = cancel_callback
         self.checkpoint_path = Path(checkpoint_path or settings.graph_checkpoint_path)
         self.graph_runtime_factory = graph_runtime_factory
+        self.project_manager = ProjectManager(self.repository)
+        self.scheduler = scheduler or FairScheduler()
         self.graph = None
         self._runtime_cm: AbstractAsyncContextManager[Any] | None = None
         self._thread_configs: dict[str, dict[str, Any]] = {}
+        self._project_threads: dict[str, set[str]] = {}
+        self._thread_projects: dict[str, str] = {}
         self._processed_event_ids: set[str] = set()
         self._processed_idempotency_keys: set[str] = set()
         self._started = False
@@ -93,6 +100,18 @@ class GraphManager:
     def register_thread(self, thread_id: str, config: dict[str, Any] | None = None) -> None:
         self._thread_configs[thread_id] = config or build_thread_config(thread_id)
 
+    def register_project_thread(self, project_id: str, thread_id: str, config: dict[str, Any] | None = None) -> None:
+        self.register_thread(thread_id, config)
+        self._project_threads.setdefault(project_id, set()).add(thread_id)
+        self._thread_projects[thread_id] = project_id
+        self.scheduler.register_project(project_id)
+
+    def thread_ids_for_project(self, project_id: str) -> list[str]:
+        return sorted(self._project_threads.get(project_id, set()))
+
+    def project_id_for_thread(self, thread_id: str) -> str | None:
+        return self._thread_projects.get(thread_id)
+
     async def list_checkpoint_threads(self) -> list[str]:
         if not await aiofiles.ospath.exists(self.checkpoint_path):
             return []
@@ -115,7 +134,7 @@ class GraphManager:
             if self.graph is None:
                 break
             config = build_thread_config(thread_id)
-            self.register_thread(thread_id, config)
+            self.register_project_thread(project_id, thread_id, config)
             snapshot = await self.graph.aget_state(config)
             if snapshot is None:
                 continue
@@ -207,6 +226,35 @@ class GraphManager:
         if cleaned:
             await self.state_manager.flush_to_disk()
         return cleaned
+
+    async def schedule_project_thread(self, *, project_id: str, thread_id: str, task_id: str, payload: dict[str, Any] | None = None) -> None:
+        self.register_project_thread(project_id, thread_id)
+        self.scheduler.enqueue(
+            ScheduledTask(
+                project_id=project_id,
+                thread_id=thread_id,
+                task_id=task_id,
+                payload=payload or {},
+            )
+        )
+
+    async def next_scheduled_thread(self) -> dict[str, Any] | None:
+        decision = self.scheduler.acquire_next()
+        if decision.task is None:
+            return None
+        return {
+            "project_id": decision.task.project_id,
+            "thread_id": decision.task.thread_id,
+            "task_id": decision.task.task_id,
+            "payload": decision.task.payload,
+        }
+
+    async def release_project_slot(self, project_id: str) -> None:
+        self.scheduler.release(project_id)
+
+    async def archive_project(self, project_id: str) -> None:
+        self.scheduler.archive_project(project_id)
+        await self.project_manager.archive_project(project_id)
 
     async def on_plan_approval_needed(self, raw_event: dict[str, Any]) -> None:
         try:
