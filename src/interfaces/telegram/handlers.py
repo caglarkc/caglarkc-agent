@@ -108,7 +108,13 @@ async def handle_cancel(update: Any, telegram_context: TelegramHandlerContext) -
         return
     guard = telegram_context.graph_manager.approval_guard if telegram_context.graph_manager else None
     request = await guard.get_approval(approval_id) if guard is not None else None
-    if request is None or request.status != "pending" or datetime.fromisoformat(request.expires_at) <= datetime.now(timezone.utc):
+    if request is None:
+        await update.effective_message.reply_text("Bu onay artik gecerli degil.")
+        return
+    if request.status != "pending":
+        await update.effective_message.reply_text("Bu karar zaten islenmis.")
+        return
+    if datetime.fromisoformat(request.expires_at) <= datetime.now(timezone.utc):
         await update.effective_message.reply_text("Bu onay artik gecerli degil.")
         return
     await telegram_context.event_bus.publish(
@@ -141,7 +147,13 @@ async def handle_approval_callback(update: Any, telegram_context: TelegramHandle
     decision = payload["decision"]
     guard = telegram_context.graph_manager.approval_guard if telegram_context.graph_manager else None
     request = await guard.get_approval(approval_id) if guard is not None else None
-    if request is None or request.status != "pending" or datetime.fromisoformat(request.expires_at) <= datetime.now(timezone.utc):
+    if request is None:
+        await query.answer("Bu onay artik gecerli degil", show_alert=True)
+        return
+    if request.status != "pending":
+        await query.answer("Karar zaten islendi", show_alert=True)
+        return
+    if datetime.fromisoformat(request.expires_at) <= datetime.now(timezone.utc):
         await query.answer("Bu onay artik gecerli degil", show_alert=True)
         return
     event_type = {
@@ -168,8 +180,23 @@ async def handle_approval_callback(update: Any, telegram_context: TelegramHandle
 def register_handlers(application: Any, telegram_context: TelegramHandlerContext) -> None:
     from telegram.ext import CallbackQueryHandler, CommandHandler
 
-    application.add_handler(CommandHandler("task", lambda update, ctx: handle_task(update, telegram_context)))
-    application.add_handler(CommandHandler("status", lambda update, ctx: handle_status(update, telegram_context)))
-    application.add_handler(CommandHandler("cancel", lambda update, ctx: handle_cancel(update, telegram_context)))
-    application.add_handler(CommandHandler("help", lambda update, ctx: handle_help(update, telegram_context)))
-    application.add_handler(CallbackQueryHandler(lambda update, ctx: handle_approval_callback(update, telegram_context), pattern=r"^ap:"))
+    async def task_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_task(update, telegram_context)
+
+    async def status_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_status(update, telegram_context)
+
+    async def cancel_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_cancel(update, telegram_context)
+
+    async def help_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_help(update, telegram_context)
+
+    async def callback_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_approval_callback(update, telegram_context)
+
+    application.add_handler(CommandHandler("task", task_wrapper))
+    application.add_handler(CommandHandler("status", status_wrapper))
+    application.add_handler(CommandHandler("cancel", cancel_wrapper))
+    application.add_handler(CommandHandler("help", help_wrapper))
+    application.add_handler(CallbackQueryHandler(callback_wrapper, pattern=r"^ap:"))
