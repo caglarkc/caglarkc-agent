@@ -60,6 +60,18 @@ class Settings(BaseSettings):
         return self.log_dir / self.log_file_name
 
     @property
+    def state_snapshot_path(self) -> Path:
+        return self.data_dir / "state_snapshot.json"
+
+    @property
+    def daemon_pid_path(self) -> Path:
+        return self.data_dir / "ai-orchestrator.pid"
+
+    @property
+    def daemon_status_path(self) -> Path:
+        return self.data_dir / "daemon_status.json"
+
+    @property
     def context_output_relative_path(self) -> Path:
         return Path(".meta") / self.context_output_file
 
