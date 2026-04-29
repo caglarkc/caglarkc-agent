@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
     openrouter_api_key_primary: str = Field(default="", alias="OPENROUTER_API_KEY_PRIMARY")
     openrouter_api_key_secondary: str = Field(default="", alias="OPENROUTER_API_KEY_SECONDARY")
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
 
     @property
     def log_file_path(self) -> Path:
