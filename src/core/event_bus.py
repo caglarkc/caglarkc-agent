@@ -37,3 +37,7 @@ class EventBus:
             return []
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return [result for result in results if isinstance(result, Exception)]
+
+    async def reset(self) -> None:
+        async with self._lock:
+            self._subscribers.clear()
