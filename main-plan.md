@@ -73,8 +73,8 @@ Proje biter → Sen bilgilendirilirsin
 |---|---|---|
 | 1 | Altyapı ve Bağlantılar | ✅ Tamamlandı |
 | 1.5 | Orchestration Contract | ✅ Tamamlandı |
-| 2 | Core Orchestration | 🔄 Aktif |
-| 3 | Dinamik Worker Sistemi | ⬜ Bekliyor |
+| 2 | Core Orchestration | ✅ Tamamlandı |
+| 3 | Dinamik Worker Sistemi | 🔄 Aktif |
 | 4 | Review ve Döngü Sistemi | ⬜ Bekliyor |
 | 5 | CLI Arayüzü | ⬜ Bekliyor |
 | 6 | Telegram Bot | ⬜ Bekliyor |
