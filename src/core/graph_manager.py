@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
+from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
+import aiosqlite
 from langgraph.types import Command
+from pydantic import ValidationError
 
+from src.config.settings import get_settings
 from src.core.approval_guard import ApprovalConsumeResult, ApprovalGuard
-from src.core.contracts import ApprovalDecision, ApprovalRequest, event_validation_error, validate_event
+from src.core.contracts import ApprovalDecision, ApprovalRequest, event_validation_error, new_event, validate_event
 from src.core.event_bus import EventBus
+from src.core.state_manager import StateManager
 from src.core.state_transaction import StateTransaction
+from src.graph.graph import build_thread_config, graph_runtime
+from src.storage.models import utc_now
+from src.storage.repository import Repository
 
 
 LOGGER = logging.getLogger(__name__)
@@ -23,23 +32,56 @@ class GraphManager:
         *,
         event_bus: EventBus | None = None,
         approval_guard: ApprovalGuard | None = None,
+        state_manager: StateManager | None = None,
+        repository: Repository | None = None,
         resume_callback: ResumeCallback | None = None,
         reject_callback: ResumeCallback | None = None,
         cancel_callback: ResumeCallback | None = None,
+        checkpoint_path: str | Path | None = None,
+        graph_runtime_factory: Callable[[str | Path | None], AbstractAsyncContextManager[Any]] = graph_runtime,
     ) -> None:
+        settings = get_settings()
         self.event_bus = event_bus or EventBus()
         self.approval_guard = approval_guard or ApprovalGuard()
+        self.state_manager = state_manager or StateManager()
+        self.repository = repository or Repository()
         self.resume_callback = resume_callback
         self.reject_callback = reject_callback
         self.cancel_callback = cancel_callback
+        self.checkpoint_path = Path(checkpoint_path or settings.graph_checkpoint_path)
+        self.graph_runtime_factory = graph_runtime_factory
         self.graph = None
+        self._runtime_cm: AbstractAsyncContextManager[Any] | None = None
         self._thread_configs: dict[str, dict[str, Any]] = {}
+        self._processed_event_ids: set[str] = set()
+        self._processed_idempotency_keys: set[str] = set()
+        self._started = False
 
     async def start(self) -> None:
+        if self._started:
+            return
         await self.event_bus.subscribe("plan.approval_needed", self.on_plan_approval_needed)
         await self.event_bus.subscribe("plan.approved", self.on_plan_approved)
         await self.event_bus.subscribe("plan.rejected", self.on_plan_rejected)
         await self.event_bus.subscribe("plan.cancelled", self.on_plan_cancelled)
+        self._started = True
+
+    async def bootstrap_runtime(self) -> None:
+        await self.repository.initialize()
+        if self.graph is not None:
+            return
+        self._runtime_cm = self.graph_runtime_factory(self.checkpoint_path)
+        self.graph = await self._runtime_cm.__aenter__()
+        LOGGER.info("Graph runtime bootstrapped at %s", self.checkpoint_path)
+
+    async def shutdown_runtime(self) -> None:
+        if self._runtime_cm is None:
+            return
+        await self.state_manager.flush_to_disk()
+        await self._runtime_cm.__aexit__(None, None, None)
+        self._runtime_cm = None
+        self.graph = None
+        LOGGER.info("Graph runtime shut down cleanly.")
 
     async def register_approval(self, approval_request: ApprovalRequest) -> None:
         await self.approval_guard.register_approval(approval_request)
@@ -47,8 +89,120 @@ class GraphManager:
     def attach_graph(self, graph: Any) -> None:
         self.graph = graph
 
-    def register_thread(self, thread_id: str, config: dict[str, Any]) -> None:
-        self._thread_configs[thread_id] = config
+    def register_thread(self, thread_id: str, config: dict[str, Any] | None = None) -> None:
+        self._thread_configs[thread_id] = config or build_thread_config(thread_id)
+
+    async def list_checkpoint_threads(self) -> list[str]:
+        if not self.checkpoint_path.exists():
+            return []
+        async with aiosqlite.connect(self.checkpoint_path) as connection:
+            cursor = await connection.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints ORDER BY thread_id ASC"
+            )
+            rows = await cursor.fetchall()
+        return [row[0] for row in rows if row and row[0]]
+
+    async def recover_pending_threads(self) -> dict[str, Any]:
+        await self.repository.initialize()
+        recovered_threads: list[dict[str, Any]] = []
+        orphan_cleanup = await self.cleanup_orphan_reservations()
+        thread_ids = await self.list_checkpoint_threads()
+        for thread_id in thread_ids:
+            if self.graph is None:
+                break
+            config = build_thread_config(thread_id)
+            self.register_thread(thread_id, config)
+            snapshot = await self.graph.aget_state(config)
+            if snapshot is None:
+                continue
+            state = dict(snapshot.values)
+            project_id = state.get("project_id")
+            if not project_id:
+                continue
+            await self.state_manager.set(project_id, state)
+            if state.get("approval_request"):
+                try:
+                    approval_request = ApprovalRequest.model_validate(state["approval_request"])
+                except ValidationError:
+                    approval_request = None
+                if approval_request is not None:
+                    await self.register_approval(approval_request)
+            recovered_threads.append(
+                {
+                    "thread_id": thread_id,
+                    "project_id": project_id,
+                    "awaiting_approval": bool(state.get("awaiting_approval")),
+                    "next": list(snapshot.next),
+                }
+            )
+        await self.state_manager.flush_to_disk()
+        payload = {
+            "recovered_threads": recovered_threads,
+            "orphan_cleanup_count": orphan_cleanup,
+        }
+        if recovered_threads or orphan_cleanup:
+            await self.event_bus.emit(
+                "system.recovered",
+                new_event(
+                    "system.recovered",
+                    payload=payload,
+                    project_id=recovered_threads[0]["project_id"] if recovered_threads else None,
+                    thread_id=recovered_threads[0]["thread_id"] if recovered_threads else None,
+                ).model_dump(),
+            )
+        LOGGER.info(
+            "Recovery completed. threads=%s orphan_cleanup=%s",
+            len(recovered_threads),
+            orphan_cleanup,
+        )
+        return payload
+
+    async def cleanup_orphan_reservations(self) -> int:
+        snapshot = await self.state_manager.snapshot()
+        active_files_by_project: dict[str, set[str]] = {}
+        for state in snapshot.values():
+            if not isinstance(state, dict):
+                continue
+            project_id = state.get("project_id")
+            if not project_id:
+                continue
+            active_files = active_files_by_project.setdefault(project_id, set())
+            active_assignment = state.get("active_assignment")
+            if isinstance(active_assignment, dict) and active_assignment.get("target_file"):
+                active_files.add(active_assignment["target_file"])
+            for assignment in state.get("active_assignments", {}).values():
+                if isinstance(assignment, dict) and assignment.get("target_file"):
+                    active_files.add(assignment["target_file"])
+
+        cleaned = 0
+        for project in await self.repository.list_projects():
+            file_records = await self.repository.list_file_records(project.project_id)
+            project_state = await self.state_manager.get(project.project_id, {})
+            if not isinstance(project_state, dict):
+                project_state = {}
+            registry = deepcopy(project_state.get("file_registry", {}))
+            for record in file_records:
+                if record.status != "reserved":
+                    continue
+                if record.path in active_files_by_project.get(project.project_id, set()):
+                    continue
+                updated = record.model_copy(
+                    update={
+                        "status": "planned",
+                        "worker_id": None,
+                        "reservation_owner": None,
+                        "updated_at": utc_now(),
+                    }
+                )
+                await self.repository.upsert_file_record(updated)
+                if registry.get(record.path) == "reserved":
+                    registry[record.path] = "planned"
+                cleaned += 1
+            if registry:
+                await self.state_manager.update(project.project_id, {"file_registry": registry})
+        if cleaned:
+            await self.state_manager.flush_to_disk()
+        return cleaned
 
     async def on_plan_approval_needed(self, raw_event: dict[str, Any]) -> None:
         try:
@@ -61,15 +215,20 @@ class GraphManager:
         await self.register_approval(approval_request)
 
     async def on_plan_approved(self, raw_event: dict[str, Any]) -> None:
-        return await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
+        await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
 
     async def on_plan_rejected(self, raw_event: dict[str, Any]) -> None:
-        return await self._handle_decision_event(raw_event, expected_event_type="plan.rejected")
+        await self._handle_decision_event(raw_event, expected_event_type="plan.rejected")
 
     async def on_plan_cancelled(self, raw_event: dict[str, Any]) -> None:
-        return await self._handle_decision_event(raw_event, expected_event_type="plan.cancelled")
+        await self._handle_decision_event(raw_event, expected_event_type="plan.cancelled")
 
-    async def _handle_decision_event(self, raw_event: dict[str, Any], *, expected_event_type: str) -> ApprovalConsumeResult:
+    async def _handle_decision_event(
+        self,
+        raw_event: dict[str, Any],
+        *,
+        expected_event_type: str,
+    ) -> ApprovalConsumeResult:
         try:
             envelope = validate_event(raw_event)
         except ValidationError as exc:
@@ -81,6 +240,18 @@ class GraphManager:
             return ApprovalConsumeResult(outcome="stale", reason="event_type_mismatch", approval_id="unknown")
         if not envelope.idempotency_key:
             return ApprovalConsumeResult(outcome="stale", reason="missing_idempotency_key", approval_id="unknown")
+        if envelope.event_id in self._processed_event_ids:
+            return ApprovalConsumeResult(
+                outcome="no-op",
+                reason="duplicate_event_id",
+                approval_id=envelope.payload.get("approval_id", "unknown"),
+            )
+        if envelope.idempotency_key in self._processed_idempotency_keys:
+            return ApprovalConsumeResult(
+                outcome="no-op",
+                reason="duplicate_idempotency_key",
+                approval_id=envelope.payload.get("approval_id", "unknown"),
+            )
 
         try:
             decision = ApprovalDecision.model_validate(
@@ -95,13 +266,16 @@ class GraphManager:
         except ValidationError as exc:
             validation_error = event_validation_error(exc)
             return ApprovalConsumeResult(outcome="stale", reason=validation_error.message, approval_id="unknown")
-        result = await self.approval_guard.consume_decision(decision)
 
+        result = await self.approval_guard.consume_decision(decision)
         if result.outcome in {"stale", "no-op"}:
             LOGGER.info("Graph action skipped for %s: %s", decision.approval_id, result.reason)
             return result
 
-        async with StateTransaction(decision.project_id) as transaction:
+        self._processed_event_ids.add(envelope.event_id)
+        self._processed_idempotency_keys.add(envelope.idempotency_key)
+
+        async with StateTransaction(decision.project_id, self.state_manager) as transaction:
             state = transaction.state
             approvals = state.setdefault("approvals", {})
             approvals[decision.approval_id] = {
@@ -112,6 +286,7 @@ class GraphManager:
             }
             transaction.state = state
 
+        await self.state_manager.flush_to_disk()
         await self._dispatch_graph_action(decision)
         return result
 
@@ -144,6 +319,9 @@ class GraphManager:
             as_node="planner",
         )
         await self.graph.ainvoke(Command(goto="dispatcher"), config=config)
+        refreshed = await self.graph.aget_state(config)
+        await self.state_manager.set(decision.project_id, refreshed.values)
+        await self.state_manager.flush_to_disk()
 
     async def _stop_graph(
         self,
@@ -173,3 +351,6 @@ class GraphManager:
             },
             as_node="planner",
         )
+        refreshed = await self.graph.aget_state(config)
+        await self.state_manager.set(decision.project_id, refreshed.values)
+        await self.state_manager.flush_to_disk()
