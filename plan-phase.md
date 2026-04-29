@@ -216,7 +216,7 @@ Worker hatalı kod yazdığında validator yakalar, reviewer fark eder, revize e
 
 ## Faz 5 — CLI Arayüzü
 
-**Durum**: 🔄 Aktif  
+**Durum**: ✅ Tamamlandı  
 **Amaç**: PC başındayken görsel terminal arayüzü ile yönetim.  
 **Skill**: `telegram-bot-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 4 tamamlanmış olmalı
@@ -248,7 +248,7 @@ Terminal açıkken tüm sistem aktivitesi görünüyor. `/task` ile görev veril
 
 ## Faz 6 — Telegram Bot
 
-**Durum**: ⬜ Bekliyor  
+**Durum**: 🔄 Aktif  
 **Amaç**: 7/24 Telegram üzerinden görev verme ve takip.  
 **Skill**: `telegram-bot-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 5 tamamlanmış olmalı (EventBus hazır)
@@ -370,6 +370,6 @@ Bu bölüm Faz 4-8 teslimlerinde zorunlu kabul kriteri olarak uygulanır.
 
 ## Güncel Durum
 
-**Aktif Faz**: Faz 5 — CLI Arayüzü  
-**Son Güncelleme**: Faz 4 tamamlandı, Faz 5 başlatıldı  
-**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri; Faz 2 — LangGraph Core: State ve Graph Yapısı; Faz 3 — Dinamik Worker Sistemi ve Bağımlılık Yönetimi; Faz 4 — Review, Validasyon ve Context Yönetimi
+**Aktif Faz**: Faz 6 — Telegram Bot  
+**Son Güncelleme**: Faz 5 tamamlandı, Faz 6 başlatıldı  
+**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri; Faz 2 — LangGraph Core: State ve Graph Yapısı; Faz 3 — Dinamik Worker Sistemi ve Bağımlılık Yönetimi; Faz 4 — Review, Validasyon ve Context Yönetimi; Faz 5 — CLI Arayüzü
