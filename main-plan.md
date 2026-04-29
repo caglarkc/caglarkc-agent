@@ -77,8 +77,8 @@ Proje biter → Sen bilgilendirilirsin
 | 3 | Dinamik Worker Sistemi | ✅ Tamamlandı |
 | 4 | Review ve Döngü Sistemi | ✅ Tamamlandı |
 | 5 | CLI Arayüzü | ✅ Tamamlandı |
-| 6 | Telegram Bot | 🔄 Aktif |
-| 7 | 7/24 Daemon | ⬜ Bekliyor |
+| 6 | Telegram Bot | ✅ Tamamlandı |
+| 7 | 7/24 Daemon | 🔄 Aktif |
 | 8 | Proje Yönetimi | ⬜ Bekliyor |
 
 > Detaylı faz planı için: `PHASE_PLAN.md`
