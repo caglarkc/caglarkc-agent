@@ -71,8 +71,8 @@ Proje biter → Sen bilgilendirilirsin
 
 | Faz | Ad | Durum |
 |---|---|---|
-| 1 | Altyapı ve Bağlantılar | ⬜ Bekliyor |
-| 1.5 | Orchestration Contract | ⬜ Bekliyor |
+| 1 | Altyapı ve Bağlantılar | ✅ Tamamlandı |
+| 1.5 | Orchestration Contract | 🔄 Aktif |
 | 2 | Core Orchestration | ⬜ Bekliyor |
 | 3 | Dinamik Worker Sistemi | ⬜ Bekliyor |
 | 4 | Review ve Döngü Sistemi | ⬜ Bekliyor |
