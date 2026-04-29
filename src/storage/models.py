@@ -70,3 +70,15 @@ class WorkerFailureLog(BaseModel):
     retry_count: int = 1
     recommendation: str = ""
     created_at: str = Field(default_factory=utc_now)
+
+
+class ProjectSummary(BaseModel):
+    project_id: str
+    project_name: str
+    status: str
+    total_sprints: int = 0
+    total_files_written: int = 0
+    total_duration_seconds: int = 0
+    worker_success_rates: dict[str, float] = Field(default_factory=dict)
+    retry_failure_rate: float = 0.0
+    archived: bool = False
