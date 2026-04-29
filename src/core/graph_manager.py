@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import aiofiles.ospath
 from langgraph.types import Command
 from pydantic import ValidationError
 
@@ -93,7 +94,7 @@ class GraphManager:
         self._thread_configs[thread_id] = config or build_thread_config(thread_id)
 
     async def list_checkpoint_threads(self) -> list[str]:
-        if not self.checkpoint_path.exists():
+        if not await aiofiles.ospath.exists(self.checkpoint_path):
             return []
         async with aiosqlite.connect(self.checkpoint_path) as connection:
             cursor = await connection.execute(
