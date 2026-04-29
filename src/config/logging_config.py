@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from logging.handlers import RotatingFileHandler
 
+from rich.logging import RichHandler
+
 from src.config.settings import get_settings
 
 
@@ -19,8 +21,14 @@ def configure_logging() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
+    console_handler = RichHandler(
+        show_time=False,
+        show_level=True,
+        show_path=False,
+        rich_tracebacks=True,
+        markup=False,
+    )
+    console_handler.setFormatter(logging.Formatter("%(name)s | %(message)s"))
 
     file_handler = RotatingFileHandler(
         filename=settings.log_file_path,
