@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import logging
+import warnings
 
 import aiofiles.os
 from langchain_community.chat_models import ChatOllama
+from langchain_community.llms.ollama import OllamaEndpointNotFoundError
+from langchain_core._api.deprecation import LangChainDeprecationWarning
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
@@ -15,6 +18,7 @@ from src.graph.graph import run_minimal_graph
 from src.storage.repository import Repository
 
 LOGGER = logging.getLogger(__name__)
+warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
 
 
 @dataclass
@@ -60,6 +64,14 @@ async def check_ollama() -> CheckResult:
             temperature=0,
         )
         response = await model.ainvoke("Ping")
+    except OllamaEndpointNotFoundError as error:
+        return CheckResult(
+            "Ollama",
+            False,
+            _clean_detail(
+                f"Ollama inference endpoint bulunamadi veya bu host generate/chat endpoint'i sunmuyor: {error}"
+            ),
+        )
     except Exception as error:
         return CheckResult("Ollama", False, _exception_detail(error))
     content = _clean_detail(str(response.content))
