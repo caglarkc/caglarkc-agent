@@ -30,9 +30,15 @@ class SprintStatusPanel(Static):
             table.add_row("State", "No active project")
         else:
             table.add_row("Project", str(state.get("project_name", "unknown")))
+            task = str(state.get("task_description", "") or "")
+            if len(task) > 140:
+                task = task[:137] + "..."
+            table.add_row("Görev", task or "—")
             table.add_row("Sprint", str(state.get("current_sprint", 0)))
             table.add_row("Status", str(state.get("sprint_status", "unknown")))
             table.add_row("Type", str(state.get("sprint_type", "unknown")))
+            awaiting = state.get("awaiting_approval")
+            table.add_row("Onay bekliyor", "evet" if awaiting else "hayır")
             file_registry = state.get("file_registry", {})
             files = ", ".join(f"{path}:{status}" for path, status in file_registry.items()) or "none"
             table.add_row("Files", files)

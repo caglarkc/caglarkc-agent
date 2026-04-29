@@ -1,1 +1,5 @@
 /.venv/
+**/__pycache__/
+*.py[cod]
+# Faz 1 graph smoke tarafından üretilen geçici checkpoint
+data/check_connections_graph.sqlite

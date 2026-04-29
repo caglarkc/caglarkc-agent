@@ -81,7 +81,7 @@ Proje biter → Sen bilgilendirilirsin
 | 7 | 7/24 Daemon | ✅ Tamamlandı |
 | 8 | Proje Yönetimi | ✅ Tamamlandı |
 
-> Detaylı faz planı için: `PHASE_PLAN.md`
+> Detaylı faz planı için: `plan-phase.md` — kabul ve test indeksi: `docs/PHASE_ACCEPTANCE.md`
 
 ---
 
