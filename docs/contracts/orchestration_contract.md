@@ -4,6 +4,10 @@ Phase 1.5 defines the minimum orchestration contract that Phase 2 must honor.
 This document is the source of truth for IDs, event envelopes, approvals, retry
 behavior, and atomic state transitions.
 
+Planning-first manager mode also emits advisory events before approval:
+- `manager.reply`
+- `plan.draft_updated`
+
 ## 1. ID Schema
 
 All IDs are opaque strings. UUID4 is the default generator unless an external

@@ -23,6 +23,7 @@ def format_telegram_status(state: dict[str, Any] | None, *, active_approval: dic
     lines = [
         f"Proje: {state.get('project_name', 'unknown')}",
         f"Sprint: {state.get('current_sprint', 0)} | {state.get('sprint_type', 'unknown')} | {state.get('sprint_status', 'unknown')}",
+        f"Planning: {state.get('planning_status', 'unknown')}",
         f"Queue: {len(queue)} | Workers: {worker_text}",
         f"Heartbeat: {_age_text(state.get('last_heartbeat_at'))} | Stalled: {'yes' if state.get('stalled_since') else 'no'}",
     ]
@@ -30,6 +31,9 @@ def format_telegram_status(state: dict[str, Any] | None, *, active_approval: dic
         lines.append(
             f"Approval: {active_approval.get('approval_id')} | {active_approval.get('approval_type')} | {active_approval.get('status', 'pending')}"
         )
+    manager_reply = str(state.get("manager_reply", "") or "")
+    if manager_reply:
+        lines.append(f"Manager: {manager_reply[:180]}")
     return "\n".join(lines)
 
 

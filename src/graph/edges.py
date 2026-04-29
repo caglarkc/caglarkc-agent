@@ -8,7 +8,9 @@ def route_after_planner(state: dict) -> str:
         return END
     if state.get("awaiting_approval"):
         return END
-    return "dispatcher"
+    if state.get("worker_queue"):
+        return "dispatcher"
+    return END
 
 
 def route_after_dispatch(state: dict) -> str:

@@ -19,6 +19,7 @@ from src.interfaces.telegram.state_view import format_telegram_history, format_t
 HELP_TEXT = "\n".join(
     [
         "/task <metin>",
+        "/apply [istege bagli not]",
         "/status",
         "/projects",
         "/history <proje>",
@@ -86,6 +87,27 @@ async def handle_task(update: Any, telegram_context: TelegramHandlerContext) -> 
         ).model_dump(),
     )
     await update.effective_message.reply_text(f"Gorev alindi: {task_text}")
+
+
+async def handle_apply(update: Any, telegram_context: TelegramHandlerContext) -> None:
+    if not await ensure_authorized(update, telegram_context):
+        return
+    state = await _latest_state(telegram_context.state_manager) or {}
+    active_project = await ProjectManager().active_project()
+    text = getattr(getattr(update, "effective_message", None), "text", "") or ""
+    parts = text.split(maxsplit=1)
+    task_text = parts[1].strip() if len(parts) > 1 else (state.get("task_description") or "apply current draft")
+    await telegram_context.event_bus.publish(
+        "task.received",
+        new_event(
+            "task.received",
+            payload={"task_description": task_text, "execution_requested": True},
+            project_id=(active_project.project_id if active_project else state.get("project_id")),
+            thread_id=state.get("current_thread_id"),
+            correlation_id=(active_project.project_id if active_project else state.get("project_id")),
+        ).model_dump(),
+    )
+    await update.effective_message.reply_text("Plan uygulama onayi icin gonderildi.")
 
 
 async def handle_status(update: Any, telegram_context: TelegramHandlerContext) -> None:
@@ -218,6 +240,9 @@ def register_handlers(application: Any, telegram_context: TelegramHandlerContext
     async def status_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await handle_status(update, telegram_context)
 
+    async def apply_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_apply(update, telegram_context)
+
     async def cancel_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await handle_cancel(update, telegram_context)
 
@@ -234,6 +259,7 @@ def register_handlers(application: Any, telegram_context: TelegramHandlerContext
         await handle_approval_callback(update, telegram_context)
 
     application.add_handler(CommandHandler("task", task_wrapper))
+    application.add_handler(CommandHandler("apply", apply_wrapper))
     application.add_handler(CommandHandler("status", status_wrapper))
     application.add_handler(CommandHandler("projects", projects_wrapper))
     application.add_handler(CommandHandler("history", history_wrapper))

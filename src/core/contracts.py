@@ -108,6 +108,66 @@ class ApprovalDecision(BaseModel):
         return value
 
 
+class PlannedFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    description: str
+    dependencies: list[str] = Field(default_factory=list)
+    task_type: str = "feature_file"
+
+    @field_validator("path", "description", "task_type")
+    @classmethod
+    def validate_required(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("value cannot be empty")
+        return value.strip()
+
+
+class PlanDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    sprint_type: str = "feature"
+    files: list[PlannedFile] = Field(default_factory=list)
+
+    @field_validator("summary", "sprint_type")
+    @classmethod
+    def validate_required(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("value cannot be empty")
+        return value.strip()
+
+
+class PlanConversationTurn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "manager"]
+    content: str
+    timestamp: str = Field(default_factory=lambda: utc_now().isoformat())
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("value cannot be empty")
+        return value.strip()
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_datetime(cls, value: str) -> str:
+        datetime.fromisoformat(value)
+        return value
+
+
+class ExecutionIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["discuss", "apply"] = "discuss"
+    explicit: bool = False
+    reason: str | None = None
+
+
 class DispatchAssignment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

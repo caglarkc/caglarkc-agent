@@ -51,3 +51,7 @@ Proje daha önce topluca: `preflight`, `smoke_fullstack`, `backup_restore_test`,
 ## Detaylı faz görevleri
 
 İş görev listesi için: [`plan-phase.md`](../plan-phase.md). Ana vizyon için: [`main-plan.md`](../main-plan.md).
+
+## Worker LLM (gerçek kod üretimi)
+
+Provider eşlemesi, prompt sözleşmesi ve `WORKER_USE_STUB` davranışı: [`REAL_WORKER.md`](REAL_WORKER.md). Birim testi: `tests/test_llm_prompt_build.py`. `pytest` yoksa venv içinde: `pip install -e ".[dev]"` (veya `pip install pytest pytest-asyncio`).

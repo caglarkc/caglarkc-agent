@@ -14,6 +14,8 @@ from src.interfaces.cli.panels import ApprovalPanel, EventLogPanel, SprintStatus
 
 
 EVENT_NAMES = [
+    "manager.reply",
+    "plan.draft_updated",
     "plan.generated",
     "plan.approval_needed",
     "sprint.started",
@@ -153,6 +155,15 @@ class OrchestratorCLIApp(App[None]):
             target_file = body.get("target_file")
             if target_file:
                 self.current_state.setdefault("file_registry", {})[target_file] = "done"
+        elif event_type == "manager.reply":
+            self.current_state["manager_reply"] = body.get("reply_text")
+            self.current_state["planning_status"] = body.get("planning_status", self.current_state.get("planning_status"))
+        elif event_type == "plan.draft_updated":
+            self.current_state["draft_plan"] = {
+                "summary": body.get("summary", ""),
+                "sprint_type": body.get("sprint_type", "feature"),
+                "files": [{"path": path} for path in body.get("files", [])],
+            }
         elif event_type == "sprint.completed":
             result = body.get("result", "approved")
             self.current_state["sprint_status"] = result

@@ -32,6 +32,14 @@ class CLINotifier:
 
     def from_event(self, event_type: str, payload: dict[str, Any] | None = None) -> Notification:
         body = payload.get("payload", {}) if isinstance(payload, dict) else {}
+        if event_type == "manager.reply" and isinstance(body, dict):
+            return self.info(body.get("reply_text", "Manager replied."), event_type=event_type)
+        if event_type == "plan.draft_updated" and isinstance(body, dict):
+            files = body.get("files") or []
+            return self.info(
+                f"Plan taslagi guncellendi: {body.get('summary', 'taslak')} | dosyalar={', '.join(files[:6])}",
+                event_type=event_type,
+            )
         if event_type == "plan.generated" and isinstance(body, dict):
             files = body.get("files") or []
             st = body.get("sprint_type", "")
