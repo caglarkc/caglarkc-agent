@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -287,6 +288,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    import contextlib
-
     main()
