@@ -132,13 +132,14 @@ class GraphManager:
         if config is None:
             LOGGER.warning("Missing thread config for resume: %s", decision.thread_id)
             return
+        snapshot = await self.graph.aget_state(config)
         await self.graph.aupdate_state(
             config,
             {
                 "awaiting_approval": False,
                 "approval_type": "",
                 "active_approval_id": None,
-                "messages": [f"approval accepted for {decision.approval_id}"],
+                "messages": [*snapshot.values.get("messages", []), f"approval accepted for {decision.approval_id}"],
             },
             as_node="planner",
         )
@@ -159,6 +160,7 @@ class GraphManager:
         if config is None:
             LOGGER.warning("Missing thread config for stop: %s", decision.thread_id)
             return
+        snapshot = await self.graph.aget_state(config)
         await self.graph.aupdate_state(
             config,
             {
@@ -166,8 +168,8 @@ class GraphManager:
                 "approval_type": "",
                 "active_approval_id": None,
                 "sprint_status": "fail",
-                "errors": [{"type": terminal_status, "approval_id": decision.approval_id}],
-                "messages": [f"approval {terminal_status} for {decision.approval_id}"],
+                "errors": [*snapshot.values.get("errors", []), {"type": terminal_status, "approval_id": decision.approval_id}],
+                "messages": [*snapshot.values.get("messages", []), f"approval {terminal_status} for {decision.approval_id}"],
             },
             as_node="planner",
         )

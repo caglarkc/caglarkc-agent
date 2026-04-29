@@ -24,6 +24,7 @@ class CheckResult:
 
 async def _run_approved_flow(checkpoint_path: Path, *, thread_id: str) -> tuple[dict, dict]:
     bus = EventBus()
+    await bus.reset()
     manager = GraphManager(event_bus=bus)
     await manager.start()
 
@@ -126,6 +127,7 @@ async def check_dependency_order() -> CheckResult:
 
 async def check_stale_approval_no_resume() -> CheckResult:
     bus = EventBus()
+    await bus.reset()
     actions: list[str] = []
 
     async def on_resume(decision: ApprovalDecision) -> None:
@@ -151,6 +153,7 @@ async def check_stale_approval_no_resume() -> CheckResult:
 
 async def check_duplicate_approval_noop() -> CheckResult:
     bus = EventBus()
+    await bus.reset()
     actions: list[str] = []
 
     async def on_resume(decision: ApprovalDecision) -> None:
@@ -185,6 +188,7 @@ async def check_checkpoint_resume() -> CheckResult:
     checkpoint_path = Path("data/check_phase2_resume.sqlite")
     thread_id = f"phase2-resume-{uuid4()}"
     bus = EventBus()
+    await bus.reset()
     manager = GraphManager(event_bus=bus)
     await manager.start()
 
