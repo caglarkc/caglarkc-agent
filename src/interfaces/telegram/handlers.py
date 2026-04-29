@@ -10,15 +10,18 @@ from telegram.ext import ContextTypes
 from src.core.contracts import new_event
 from src.core.event_bus import EventBus
 from src.core.graph_manager import GraphManager
+from src.core.project_manager import ProjectManager
 from src.core.state_manager import StateManager
 from src.interfaces.telegram.keyboards import decode_approval_callback
-from src.interfaces.telegram.state_view import format_telegram_status
+from src.interfaces.telegram.state_view import format_telegram_history, format_telegram_projects, format_telegram_status
 
 
 HELP_TEXT = "\n".join(
     [
         "/task <metin>",
         "/status",
+        "/projects",
+        "/history <proje>",
         "/cancel [approval_id] [reason]",
         "/help",
     ]
@@ -90,6 +93,34 @@ async def handle_status(update: Any, telegram_context: TelegramHandlerContext) -
     state = await _latest_state(telegram_context.state_manager)
     active_approval = state.get("approval_request") if isinstance(state, dict) else None
     await update.effective_message.reply_text(format_telegram_status(state, active_approval=active_approval))
+
+
+async def handle_projects(update: Any, telegram_context: TelegramHandlerContext) -> None:
+    if not await ensure_authorized(update, telegram_context):
+        return
+    manager = ProjectManager()
+    projects = await manager.list_projects(active_only=True)
+    active = await manager.active_project()
+    await update.effective_message.reply_text(
+        format_telegram_projects(projects, active_project_id=active.project_id if active else None)
+    )
+
+
+async def handle_history(update: Any, telegram_context: TelegramHandlerContext) -> None:
+    if not await ensure_authorized(update, telegram_context):
+        return
+    text = getattr(getattr(update, "effective_message", None), "text", "") or ""
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        await update.effective_message.reply_text("Kullanim: /history <proje>")
+        return
+    manager = ProjectManager()
+    project = await manager.get_project(parts[1].strip())
+    if project is None:
+        await update.effective_message.reply_text(f"Proje bulunamadi: {parts[1].strip()}")
+        return
+    history = await manager.project_history(project.project_id)
+    await update.effective_message.reply_text(format_telegram_history(project.name, history))
 
 
 async def handle_cancel(update: Any, telegram_context: TelegramHandlerContext) -> None:
@@ -189,6 +220,12 @@ def register_handlers(application: Any, telegram_context: TelegramHandlerContext
     async def cancel_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await handle_cancel(update, telegram_context)
 
+    async def projects_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_projects(update, telegram_context)
+
+    async def history_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await handle_history(update, telegram_context)
+
     async def help_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await handle_help(update, telegram_context)
 
@@ -197,6 +234,8 @@ def register_handlers(application: Any, telegram_context: TelegramHandlerContext
 
     application.add_handler(CommandHandler("task", task_wrapper))
     application.add_handler(CommandHandler("status", status_wrapper))
+    application.add_handler(CommandHandler("projects", projects_wrapper))
+    application.add_handler(CommandHandler("history", history_wrapper))
     application.add_handler(CommandHandler("cancel", cancel_wrapper))
     application.add_handler(CommandHandler("help", help_wrapper))
     application.add_handler(CallbackQueryHandler(callback_wrapper, pattern=r"^ap:"))
