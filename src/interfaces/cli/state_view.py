@@ -34,3 +34,24 @@ def format_status_summary(state: dict[str, Any] | None, *, active_approval: dict
             f"Approval: {active_approval.get('approval_id')} | Type: {active_approval.get('approval_type')} | Status: {active_approval.get('status')}"
         )
     return "\n".join(lines)
+
+
+def format_projects_listing(projects: list[Any], *, active_project_id: str | None = None) -> str:
+    if not projects:
+        return "Projects: none"
+    lines = ["Projects:"]
+    for project in projects:
+        marker = "*" if getattr(project, "project_id", None) == active_project_id or project.metadata.get("selected") else "-"
+        lines.append(f"{marker} {project.project_id} | {project.name} | {project.status}")
+    return "\n".join(lines)
+
+
+def format_project_history(project_name: str, items: list[dict[str, Any]]) -> str:
+    if not items:
+        return f"History: {project_name} | none"
+    lines = [f"History: {project_name}"]
+    for item in items:
+        lines.append(
+            f"- sprint {item['number']} | {item['type']} | {item['status']} | review={item['review_cycles']} | v{item['plan_version']}"
+        )
+    return "\n".join(lines)
