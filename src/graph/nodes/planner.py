@@ -3,93 +3,123 @@ from __future__ import annotations
 from copy import deepcopy
 from uuid import uuid4
 
-from src.core.context_builder import ContextBuilder
+from src.core.contracts import ApprovalRequest, DispatchAssignment, new_event
 from src.core.event_bus import EventBus
-from src.core.project_manager import ProjectManager
-from src.storage.models import Decision, FileRecord, Project, Sprint
-from src.storage.repository import Repository
+from src.core.state_transaction import StateTransaction
 
 
 async def planner_node(state: dict) -> dict:
-    repository = Repository()
-    project_manager = ProjectManager()
-    await repository.initialize()
+    project_id = state["project_id"]
+    thread_id = state["current_thread_id"]
+    sprint_id = f"sprint-{state.get('current_sprint', 1)}"
 
-    project = Project(
-        project_id=state["project_id"],
-        name=state["project_name"],
-        description=state["task_description"],
-        status="planning",
-    )
-    await repository.upsert_project(project)
-
-    sprint = Sprint(
-        sprint_id=str(uuid4()),
-        project_id=state["project_id"],
-        number=state.get("current_sprint", 1),
-        sprint_type="feature",
-        status="planning",
-    )
-    await repository.create_sprint(sprint)
-
-    queue = state.get("worker_queue") or [
+    queue = [
         {
-            "file": "README.phase1.md",
-            "description": "Create a smoke-test artifact for phase 1.",
-            "assigned_to": "worker_stub",
+            "assignment": DispatchAssignment(
+                task_id=str(uuid4()),
+                project_id=project_id,
+                thread_id=thread_id,
+                sprint_id=sprint_id,
+                worker_id="",
+                target_file="helpers.py",
+                description="Create a helper function for the generated project.",
+                correlation_id=project_id,
+                metadata={"kind": "python"},
+            ).model_dump(),
             "status": "planned",
-        }
-    ]
-    file_registry = deepcopy(state.get("file_registry") or {})
-    for job in queue:
-        file_registry.setdefault(job["file"], "planned")
-        await repository.create_file_record(
-            FileRecord(
-                file_id=str(uuid4()),
-                project_id=state["project_id"],
-                sprint_id=sprint.sprint_id,
-                path=job["file"],
-                status="planned",
-                worker_id=job.get("assigned_to"),
-            )
-        )
-
-    await repository.create_decision(
-        Decision(
-            decision_id=str(uuid4()),
-            project_id=state["project_id"],
-            sprint_id=sprint.sprint_id,
-            summary="Phase 1 planner generated a minimal sequential workflow.",
-            rationale="Smoke-test mode keeps graph execution deterministic.",
-        )
-    )
-
-    context_summary = await ContextBuilder(repository=repository, project_manager=project_manager).build(
-        state["project_id"],
-        state["project_name"],
-    )
-    await project_manager.write_plan(
-        state["project_name"],
+            "validation_error": None,
+        },
         {
-            "project_id": state["project_id"],
-            "name": state["project_name"],
-            "description": state["task_description"],
-            "status": "active",
-            "created_at": project.created_at,
-            "sprints": [sprint.model_dump()],
-            "current_sprint": sprint.number,
+            "assignment": DispatchAssignment(
+                task_id=str(uuid4()),
+                project_id=project_id,
+                thread_id=thread_id,
+                sprint_id=sprint_id,
+                worker_id="",
+                target_file="app.py",
+                description="Create the application entry that uses helpers.",
+                correlation_id=project_id,
+                metadata={"kind": "python"},
+            ).model_dump(),
+            "status": "planned",
+            "validation_error": None,
+        },
+    ]
+    dependencies = {
+        "helpers.py": [],
+        "app.py": ["helpers.py"],
+    }
+    file_registry = {target_file: "planned" for target_file in dependencies}
+    approval_request = ApprovalRequest(
+        approval_id=str(uuid4()),
+        project_id=project_id,
+        thread_id=thread_id,
+        sprint_id=sprint_id,
+        approval_type="plan",
+        reason="Planner generated the initial dependency-aware sprint plan.",
+        metadata={
+            "files": list(file_registry.keys()),
+            "dependencies": deepcopy(dependencies),
         },
     )
-    await EventBus().emit("plan.generated", {"project_id": state["project_id"]})
+    context_summary = (
+        f"Project={state['project_name']} | Sprint={state.get('current_sprint', 1)} | "
+        f"Task={state['task_description']} | Files={', '.join(file_registry.keys())}"
+    )
 
-    return {
-        "file_registry": file_registry,
-        "dependencies": state.get("dependencies", {}),
+    await EventBus().emit(
+        "plan.generated",
+        new_event(
+            "plan.generated",
+            payload={
+                "project_id": project_id,
+                "sprint_id": sprint_id,
+                "files": list(file_registry.keys()),
+            },
+            project_id=project_id,
+            thread_id=thread_id,
+            sprint_id=sprint_id,
+            correlation_id=project_id,
+        ).model_dump(),
+    )
+    await EventBus().emit(
+        "plan.approval_needed",
+        new_event(
+            "plan.approval_needed",
+            payload=approval_request.model_dump(),
+            project_id=project_id,
+            thread_id=thread_id,
+            sprint_id=sprint_id,
+            correlation_id=project_id,
+            idempotency_key=approval_request.approval_id,
+        ).model_dump(),
+    )
+
+    updates = {
         "worker_queue": queue,
-        "worker_status": {"worker_stub": "ready"},
-        "sprint_type": sprint.sprint_type,
-        "sprint_status": "active",
-        "current_sprint": sprint.number,
+        "dependencies": dependencies,
+        "file_registry": file_registry,
+        "worker_status": state.get("worker_status", {"worker_a": "idle"}),
+        "worker_outputs": state.get("worker_outputs", {"worker_a": []}),
+        "worker_failure_log": state.get("worker_failure_log", {"worker_a": []}),
+        "current_sprint": state.get("current_sprint", 1),
+        "sprint_type": "feature",
+        "sprint_status": "planning",
+        "awaiting_approval": True,
+        "approval_type": "plan",
+        "active_approval_id": approval_request.approval_id,
+        "approval_request": approval_request.model_dump(),
         "context_summary": context_summary,
         "messages": [*state.get("messages", []), "planner completed"],
+        "errors": state.get("errors", []),
+        "validation_issues": [],
+        "revision_tasks": [],
+        "active_assignment": None,
     }
+
+    async with StateTransaction(project_id) as transaction:
+        persisted = transaction.state
+        persisted.update(updates)
+        transaction.state = persisted
+
+    return updates
