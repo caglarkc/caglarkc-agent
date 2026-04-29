@@ -6,6 +6,7 @@ from contextlib import AbstractAsyncContextManager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import aiosqlite
 import aiofiles.ospath
@@ -21,6 +22,7 @@ from src.core.scheduler import FairScheduler, ScheduledTask
 from src.core.state_manager import StateManager
 from src.core.state_transaction import StateTransaction
 from src.graph.graph import build_thread_config, graph_runtime
+from src.graph.state import build_initial_state
 from src.storage.models import utc_now
 from src.storage.repository import Repository
 
@@ -72,7 +74,108 @@ class GraphManager:
         await self.event_bus.subscribe("plan.approved", self.on_plan_approved)
         await self.event_bus.subscribe("plan.rejected", self.on_plan_rejected)
         await self.event_bus.subscribe("plan.cancelled", self.on_plan_cancelled)
+        await self.event_bus.subscribe("task.received", self.handle_task_received)
         self._started = True
+
+    async def _emit_snapshot_sync(self, project_id: str | None, thread_id: str | None, *, phase: str) -> None:
+        await self.event_bus.emit(
+            "snapshot.synced",
+            new_event(
+                "snapshot.synced",
+                payload={"project_id": project_id, "phase": phase},
+                project_id=project_id,
+                thread_id=thread_id,
+            ).model_dump(),
+        )
+
+    async def handle_task_received(self, raw_event: dict[str, Any]) -> None:
+        """Runs planner for a new user task (CLI/Telegram) and persists graph state."""
+        try:
+            envelope = validate_event(raw_event)
+        except ValidationError as exc:
+            LOGGER.warning("task.received ignored (invalid envelope): %s", exc)
+            return
+
+        payload = envelope.payload or {}
+        task_description = payload.get("task_description")
+        if not isinstance(task_description, str) or not task_description.strip():
+            LOGGER.warning("task.received ignored (missing task_description)")
+            return
+        task_description = task_description.strip()
+
+        project_id = envelope.project_id
+        if not project_id:
+            active = await self.project_manager.active_project()
+            project_id = active.project_id if active else None
+
+        if not project_id:
+            LOGGER.error("task.received: no project_id and no active project")
+            await self.event_bus.emit(
+                "error.occurred",
+                new_event(
+                    "error.occurred",
+                    payload={
+                        "reason": "no_project",
+                        "detail": "Select a project (/project use) or ensure one exists in the database.",
+                    },
+                    project_id=None,
+                ).model_dump(),
+            )
+            return
+
+        await self.repository.initialize()
+        project = await self.repository.get_project(project_id)
+        if project is None:
+            LOGGER.error("task.received: project not found: %s", project_id)
+            await self.event_bus.emit(
+                "error.occurred",
+                new_event(
+                    "error.occurred",
+                    payload={"reason": "unknown_project", "project_id": project_id},
+                    project_id=project_id,
+                ).model_dump(),
+            )
+            return
+
+        if self.graph is None:
+            LOGGER.warning("task.received dropped: graph runtime not bootstrapped yet")
+            await self.event_bus.emit(
+                "error.occurred",
+                new_event(
+                    "error.occurred",
+                    payload={"reason": "graph_not_ready", "detail": "Daemon startup not finished."},
+                    project_id=project_id,
+                ).model_dump(),
+            )
+            return
+
+        thread_id = f"thread-{uuid4().hex}"
+        config = build_thread_config(thread_id)
+        self.register_project_thread(project_id, thread_id, config)
+        initial = build_initial_state(
+            project_name=project.name,
+            task_description=task_description,
+            project_id=project_id,
+            current_thread_id=thread_id,
+        )
+        try:
+            await self.graph.ainvoke(initial, config=config)
+            snapshot = await self.graph.aget_state(config)
+            values = dict(snapshot.values)
+            await self.state_manager.set(project_id, values)
+            await self.state_manager.flush_to_disk()
+            await self._emit_snapshot_sync(project_id, thread_id, phase="plan_ready")
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.exception("task.received graph execution failed")
+            await self.event_bus.emit(
+                "error.occurred",
+                new_event(
+                    "error.occurred",
+                    payload={"reason": "graph_invoke_failed", "detail": str(exc)},
+                    project_id=project_id,
+                    thread_id=thread_id,
+                ).model_dump(),
+            )
 
     async def bootstrap_runtime(self) -> None:
         await self.repository.initialize()
@@ -375,6 +478,7 @@ class GraphManager:
         refreshed = await self.graph.aget_state(config)
         await self.state_manager.set(decision.project_id, refreshed.values)
         await self.state_manager.flush_to_disk()
+        await self._emit_snapshot_sync(decision.project_id, decision.thread_id, phase="post_approval")
 
     async def _stop_graph(
         self,
@@ -407,3 +511,4 @@ class GraphManager:
         refreshed = await self.graph.aget_state(config)
         await self.state_manager.set(decision.project_id, refreshed.values)
         await self.state_manager.flush_to_disk()
+        await self._emit_snapshot_sync(decision.project_id, decision.thread_id, phase=f"stopped_{terminal_status}")
