@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 import aiosqlite
@@ -356,12 +357,7 @@ class Repository:
         if timestamps:
             started = min(item for item in timestamps if item)
             ended = max(item for item in timestamps if item)
-            total_duration_seconds = int(
-                (
-                    __import__("datetime").datetime.fromisoformat(ended)
-                    - __import__("datetime").datetime.fromisoformat(started)
-                ).total_seconds()
-            )
+            total_duration_seconds = int((datetime.fromisoformat(ended) - datetime.fromisoformat(started)).total_seconds())
         worker_totals: dict[str, int] = {}
         worker_successes: dict[str, int] = {}
         retry_attempts = 0
