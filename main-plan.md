@@ -75,8 +75,8 @@ Proje biter → Sen bilgilendirilirsin
 | 1.5 | Orchestration Contract | ✅ Tamamlandı |
 | 2 | Core Orchestration | ✅ Tamamlandı |
 | 3 | Dinamik Worker Sistemi | ✅ Tamamlandı |
-| 4 | Review ve Döngü Sistemi | 🔄 Aktif |
-| 5 | CLI Arayüzü | ⬜ Bekliyor |
+| 4 | Review ve Döngü Sistemi | ✅ Tamamlandı |
+| 5 | CLI Arayüzü | 🔄 Aktif |
 | 6 | Telegram Bot | ⬜ Bekliyor |
 | 7 | 7/24 Daemon | ⬜ Bekliyor |
 | 8 | Proje Yönetimi | ⬜ Bekliyor |
