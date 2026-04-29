@@ -248,7 +248,7 @@ Terminal açıkken tüm sistem aktivitesi görünüyor. `/task` ile görev veril
 
 ## Faz 6 — Telegram Bot
 
-**Durum**: 🔄 Aktif  
+**Durum**: ✅ Tamamlandı  
 **Amaç**: 7/24 Telegram üzerinden görev verme ve takip.  
 **Skill**: `telegram-bot-patterns`, `python-async-patterns`  
 **Bağımlılık**: Faz 5 tamamlanmış olmalı (EventBus hazır)
@@ -281,7 +281,7 @@ Telegramdan `/task` ile görev veriliyor, plan inline keyboard ile onaylanıyor,
 
 ## Faz 7 — 7/24 Daemon
 
-**Durum**: ⬜ Bekliyor  
+**Durum**: 🔄 Aktif  
 **Amaç**: Sistem PC açılınca otomatik başlasın, çökerse kendini kurtarsın.  
 **Skill**: `daemon-ops`, `python-async-patterns`  
 **Bağımlılık**: Faz 6 tamamlanmış olmalı
@@ -370,6 +370,6 @@ Bu bölüm Faz 4-8 teslimlerinde zorunlu kabul kriteri olarak uygulanır.
 
 ## Güncel Durum
 
-**Aktif Faz**: Faz 6 — Telegram Bot  
-**Son Güncelleme**: Faz 5 tamamlandı, Faz 6 başlatıldı  
-**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri; Faz 2 — LangGraph Core: State ve Graph Yapısı; Faz 3 — Dinamik Worker Sistemi ve Bağımlılık Yönetimi; Faz 4 — Review, Validasyon ve Context Yönetimi; Faz 5 — CLI Arayüzü
+**Aktif Faz**: Faz 7 — 7/24 Daemon  
+**Son Güncelleme**: Faz 6 tamamlandı, Faz 7 başlatıldı  
+**Tamamlanan Faz**: Faz 1 — Altyapı ve Bağlantılar; Faz 1.5 — Orchestration Contract ve Çalışma Sözleşmeleri; Faz 2 — LangGraph Core: State ve Graph Yapısı; Faz 3 — Dinamik Worker Sistemi ve Bağımlılık Yönetimi; Faz 4 — Review, Validasyon ve Context Yönetimi; Faz 5 — CLI Arayüzü; Faz 6 — Telegram Bot
