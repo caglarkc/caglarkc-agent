@@ -8,7 +8,11 @@ from rich.logging import RichHandler
 from src.config.settings import get_settings
 
 
-def configure_logging() -> None:
+DAEMON_LOG_MAX_BYTES = 10 * 1024 * 1024
+DAEMON_LOG_BACKUP_COUNT = 5
+
+
+def configure_logging(*, daemon_mode: bool = False) -> None:
     settings = get_settings()
     settings.log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -32,8 +36,10 @@ def configure_logging() -> None:
 
     file_handler = RotatingFileHandler(
         filename=settings.log_file_path,
-        maxBytes=settings.log_max_bytes,
-        backupCount=settings.log_backup_count,
+        maxBytes=max(settings.log_max_bytes, DAEMON_LOG_MAX_BYTES) if daemon_mode else settings.log_max_bytes,
+        backupCount=max(settings.log_backup_count, DAEMON_LOG_BACKUP_COUNT)
+        if daemon_mode
+        else settings.log_backup_count,
         encoding="utf-8",
     )
     file_handler.setFormatter(formatter)
