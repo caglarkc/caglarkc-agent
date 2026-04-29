@@ -134,7 +134,7 @@ class GraphManager:
             if self.graph is None:
                 break
             config = build_thread_config(thread_id)
-            self.register_project_thread(project_id, thread_id, config)
+            self.register_thread(thread_id, config)
             snapshot = await self.graph.aget_state(config)
             if snapshot is None:
                 continue
@@ -142,6 +142,7 @@ class GraphManager:
             project_id = state.get("project_id")
             if not project_id:
                 continue
+            self.register_project_thread(project_id, thread_id, config)
             await self.state_manager.set(project_id, state)
             if state.get("approval_request"):
                 try:
