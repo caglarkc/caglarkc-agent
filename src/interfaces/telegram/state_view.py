@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any
+
+
+def _age_text(timestamp: str | None) -> str:
+    if not timestamp:
+        return "never"
+    delta = datetime.now(timezone.utc) - datetime.fromisoformat(timestamp)
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s"
+    return f"{seconds // 60}m"
+
+
+def format_telegram_status(state: dict[str, Any] | None, *, active_approval: dict[str, Any] | None = None) -> str:
+    if not state:
+        return "Durum: aktif proje yok"
+    queue = state.get("worker_queue", [])
+    workers = state.get("worker_status", {})
+    worker_text = ", ".join(f"{worker}:{status}" for worker, status in workers.items()) or "none"
+    lines = [
+        f"Proje: {state.get('project_name', 'unknown')}",
+        f"Sprint: {state.get('current_sprint', 0)} | {state.get('sprint_type', 'unknown')} | {state.get('sprint_status', 'unknown')}",
+        f"Queue: {len(queue)} | Workers: {worker_text}",
+        f"Heartbeat: {_age_text(state.get('last_heartbeat_at'))} | Stalled: {'yes' if state.get('stalled_since') else 'no'}",
+    ]
+    if active_approval:
+        lines.append(
+            f"Approval: {active_approval.get('approval_id')} | {active_approval.get('approval_type')} | {active_approval.get('status', 'pending')}"
+        )
+    return "\n".join(lines)
