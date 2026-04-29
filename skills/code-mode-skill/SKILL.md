@@ -45,12 +45,12 @@ YAPILACAKLAR: <adım listesi>
 
 ## Katman Kuralları
 
-### CrewAI Katmanı (`src/crew/`)
-- `Router → Manager → Worker` zinciri korunur
-- Manager agent direkt tool çağırmaz, worker'lara delege eder
-- Her agent kendi `llm` parametresiyle tanımlanır
-- `Process.hierarchical` dışında process kullanılmaz
-- Referans: `crewai-patterns/SKILL.md`
+### LangGraph Katmanı (`src/graph/`)
+- `planner → dispatcher → workers → validator → reviewer` akışı korunur
+- Her node async fonksiyon — state alır, dict döner (sadece değiştirilen alanlar)
+- Worker node'lar `file_registry`'de rezerve edilmiş dosyaya yazar, başkasına dokunamaz
+- Koşullu edge fonksiyonları `edges.py`'de tanımlanır, node içine yazılmaz
+- Referans: `langgraph-patterns/SKILL.md`
 
 ### Interface Katmanı (`src/interfaces/`)
 - Telegram ve CLI aynı `EventBus`'a bağlanır
@@ -125,6 +125,6 @@ NOTLAR:
 ## References
 
 - `project-architecture/SKILL.md` — zorunlu, her görevde referans alınır
-- `crewai-patterns/SKILL.md` — CrewAI kodu yazarken
+- `langgraph-patterns/SKILL.md` — LangGraph kodu yazarken
 - `python-async-patterns/SKILL.md` — async kod yazarken
 - `telegram-bot-patterns/SKILL.md` — Telegram/CLI kodu yazarken

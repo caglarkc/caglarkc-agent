@@ -64,28 +64,27 @@ sudo journalctl -u ai-orchestrator -f
 - `StartLimitBurst=3` — 60 saniyede max 3 restart
 
 ### Uygulama Seviyesi
-CrewAI Flow persistence ile kaldığı yerden devam eder:
+LangGraph SqliteSaver ile interrupted thread'ler resume edilir:
 
 ```python
 # main.py
 async def main():
-    # Başlangıçta bekleyen flow'ları recover et
-    flow_manager = FlowManager()
-    await flow_manager.recover_pending_flows()
+    # Başlangıçta bekleyen graph thread'lerini recover et
+    graph_manager = GraphManager(graph=compiled_graph)
+    await graph_manager.recover_pending_graphs()
 
     # Normal başlatma devam eder
     await asyncio.gather(
         telegram.start(),
-        flow_manager.listen(),
         keep_alive()
     )
 ```
 
 ### State Recovery
 ```python
-# src/core/flow_manager.py
-async def recover_pending_flows(self):
-    logger.info("Bekleyen flow'lar kontrol ediliyor...")
+# src/core/graph_manager.py
+async def recover_pending_graphs(self):
+    logger.info("Bekleyen graph thread'leri kontrol ediliyor...")
     try:
         pending = await self.persistence.get_all_pending()
         if not pending:

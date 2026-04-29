@@ -55,7 +55,7 @@ bus.subscribe("sprint.completed", telegram_notifier.on_sprint_completed)
 # CLI dinler
 bus.subscribe("sprint.completed", cli_notifier.on_sprint_completed)
 
-# CrewAI emit eder
+# LangGraph node'u emit eder
 await bus.emit("sprint.completed", {"sprint_id": "...", "summary": "..."})
 ```
 
@@ -201,25 +201,42 @@ class StateManager:
 
 ## Crash Recovery
 
-CrewAI Flow SQLite persistence ile kaldığı yerden devam eder:
+LangGraph SqliteSaver ile interrupted thread'ler resume edilir:
 
 ```python
-from crewai.flow.persistence.sqlite import SQLiteFlowPersistence
+# src/core/graph_manager.py
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from src.core.event_bus import EventBus
 
-persistence = SQLiteFlowPersistence(db_path="./storage/flow_state.db")
+class GraphManager:
+    def __init__(self, graph):
+        self.graph = graph
+        self.bus = EventBus()
+        self.bus.subscribe("plan.approved", self.on_plan_approved)
+        self.bus.subscribe("plan.rejected", self.on_plan_rejected)
 
-# Flow başlatırken persistence ver
-flow = OrchestratorFlow(persistence=persistence)
+    async def recover_pending_graphs(self):
+        logger.info("Bekleyen graph thread'leri kontrol ediliyor...")
+        async with AsyncSqliteSaver.from_conn_string("./storage/graph.db") as checkpointer:
+            async for thread in checkpointer.alist(filter={"status": "interrupted"}):
+                thread_id = thread.config["configurable"]["thread_id"]
+                logger.info(f"Graph resume ediliyor: {thread_id}")
+                await self.bus.emit("system.recovered", {
+                    "thread_id": thread_id,
+                    "message": "Sistem yeniden başladı. Onay bekleniyor."
+                })
 
-# Crash sonrası resume:
-async def recover_pending_flows():
-    pending = await persistence.get_all_pending()
-    for flow_state in pending:
-        flow = OrchestratorFlow.from_pending(
-            flow_id=flow_state.flow_id,
-            persistence=persistence
-        )
-        asyncio.create_task(flow.resume())
+    async def on_plan_approved(self, data: dict):
+        thread_id = data["thread_id"]
+        config = {"configurable": {"thread_id": thread_id}}
+        from langgraph.types import Command
+        asyncio.create_task(self.graph.ainvoke(Command(resume="approved"), config))
+
+    async def on_plan_rejected(self, data: dict):
+        thread_id = data["thread_id"]
+        config = {"configurable": {"thread_id": thread_id}}
+        from langgraph.types import Command
+        asyncio.create_task(self.graph.ainvoke(Command(resume="rejected"), config))
 ```
 
 ---
