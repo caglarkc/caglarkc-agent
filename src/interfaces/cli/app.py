@@ -21,6 +21,7 @@ EVENT_NAMES = [
     "sprint.review_started",
     "sprint.revision_needed",
     "sprint.completed",
+    "snapshot.synced",
     "system.heartbeat",
     "system.stalled",
     "error.occurred",
@@ -116,6 +117,18 @@ class OrchestratorCLIApp(App[None]):
             self.active_approval = approval
             if self.current_state is not None:
                 self.current_state["approval_request"] = approval
+                if isinstance(approval, dict):
+                    self.current_state["awaiting_approval"] = approval.get("status") == "pending"
+        elif event_type == "snapshot.synced":
+            body = payload.get("payload") or {}
+            pid = body.get("project_id") if isinstance(body, dict) else None
+            pid = pid or payload.get("project_id")
+            if pid:
+                merged = await self.state_manager.get(pid, {})
+                if isinstance(merged, dict) and merged:
+                    self.current_state = merged
+                    ar = merged.get("approval_request")
+                    self.active_approval = ar if isinstance(ar, dict) else self.active_approval
         elif event_type in {"plan.approved", "plan.rejected", "plan.cancelled"} and self.active_approval:
             self.active_approval["status"] = event_type.split(".")[1]
         else:
