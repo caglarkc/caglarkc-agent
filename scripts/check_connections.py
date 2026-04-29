@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass
 import logging
 import warnings
+from pathlib import Path
+from uuid import uuid4
 
 import aiofiles.os
 from langchain_community.chat_models import ChatOllama
@@ -11,10 +13,12 @@ from langchain_community.llms.ollama import OllamaEndpointNotFoundError
 from langchain_core._api.deprecation import LangChainDeprecationWarning
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 
 from src.config.logging_config import configure_logging
 from src.config.settings import get_settings
-from src.graph.graph import run_minimal_graph
+from src.graph.graph import build_thread_config, graph_runtime
+from src.graph.state import build_initial_state
 from src.storage.repository import Repository
 
 LOGGER = logging.getLogger(__name__)
@@ -101,6 +105,67 @@ async def check_openrouter(api_key: str, label: str) -> CheckResult:
     return CheckResult(label, True, f"LangChain adapter yanit verdi: {content or 'bos-icerik'}")
 
 
+async def run_minimal_graph() -> dict:
+    """Plan onayı → dispatcher’dan sonra tüm düğümler tek smoke akışında (ayrı checkpoint dosyası)."""
+    settings = get_settings()
+    thread_id = f"chk-{uuid4().hex[:12]}"
+    checkpoint_path = Path(settings.data_dir) / "check_connections_graph.sqlite"
+
+    async with graph_runtime(checkpoint_path) as graph:
+        config = build_thread_config(thread_id)
+        initial = build_initial_state(
+            project_name="phase1-connection-smoke",
+            task_description="connection smoke minimal run",
+            current_thread_id=thread_id,
+        )
+        paused = await graph.ainvoke(initial, config=config)
+        snapshot = await graph.aget_state(config)
+        values_before = snapshot.values
+        if not values_before.get("awaiting_approval"):
+            return {
+                "thread_id": thread_id,
+                "result": paused,
+                "checkpoint_values": {},
+                "checkpoint_next": [],
+            }
+
+        await graph.aupdate_state(
+            config,
+            {
+                "awaiting_approval": False,
+                "approval_type": "",
+                "active_approval_id": None,
+                "approval_request": None,
+                "messages": [*values_before.get("messages", []), "smoke:auto-approved plan"],
+            },
+            as_node="planner",
+        )
+        final_state = await graph.ainvoke(Command(goto="dispatcher"), config=config)
+        refreshed = await graph.aget_state(config)
+        chk = dict(refreshed.values)
+        return {
+            "thread_id": thread_id,
+            "result": final_state if isinstance(final_state, dict) else chk,
+            "checkpoint_values": chk,
+            "checkpoint_next": list(refreshed.next),
+        }
+
+
+def _messages_indicate_complete(messages: list) -> tuple[bool, str]:
+    msgs = [str(m) for m in messages] if isinstance(messages, list) else []
+    blob = "\n".join(msgs)
+    need = []
+    if "planner completed" not in blob:
+        need.append("planner")
+    if not any("worker completed" in m for m in msgs):
+        need.append("worker")
+    if "validator completed" not in blob:
+        need.append("validator")
+    if "reviewer approved sprint" not in blob:
+        need.append("reviewer")
+    return (not need), ", eksik:" + ",".join(need) if need else ""
+
+
 async def check_graph_and_checkpoint() -> tuple[CheckResult, CheckResult]:
     settings = get_settings()
     await aiofiles.os.makedirs(settings.data_dir, exist_ok=True)
@@ -116,10 +181,11 @@ async def check_graph_and_checkpoint() -> tuple[CheckResult, CheckResult]:
             True,
             f"Checkpoint yazildi ve geri okundu: {result['thread_id']}",
         )
-    messages = result["result"].get("messages", [])
     checkpoint_values = result["checkpoint_values"]
-    expected_steps = {"planner completed", "worker completed", "reviewer completed"}
-    if expected_steps.issubset(set(messages)) and checkpoint_values.get("sprint_status") == "completed":
+    messages = checkpoint_values.get("messages") or []
+    ok_msgs, diag = _messages_indicate_complete(messages)
+    status_ok = checkpoint_values.get("sprint_status") == "approved"
+    if ok_msgs and status_ok:
         graph_result = CheckResult(
             "LangGraph Flow",
             True,
@@ -129,7 +195,7 @@ async def check_graph_and_checkpoint() -> tuple[CheckResult, CheckResult]:
         graph_result = CheckResult(
             "LangGraph Flow",
             False,
-            f"Beklenen akis tamamlanmadi: {messages}",
+            f"sprint_status={checkpoint_values.get('sprint_status')}{diag}; messages={messages[-8:]}",
         )
     return checkpoint_result, graph_result
 

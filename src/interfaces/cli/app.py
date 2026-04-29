@@ -100,8 +100,12 @@ class OrchestratorCLIApp(App[None]):
             _, state = next(reversed(snapshot.items()))
             if isinstance(state, dict):
                 self.current_state = state
-                approval_request = state.get("approval_request")
-                self.active_approval = approval_request if isinstance(approval_request, dict) else None
+                awaiting = state.get("awaiting_approval")
+                ar = state.get("approval_request")
+                if awaiting and isinstance(ar, dict):
+                    self.active_approval = ar
+                else:
+                    self.active_approval = None
 
     async def _subscribe_events(self) -> None:
         for event_name in EVENT_NAMES:
@@ -127,8 +131,13 @@ class OrchestratorCLIApp(App[None]):
                 merged = await self.state_manager.get(pid, {})
                 if isinstance(merged, dict) and merged:
                     self.current_state = merged
+                    awaiting = merged.get("awaiting_approval")
                     ar = merged.get("approval_request")
-                    self.active_approval = ar if isinstance(ar, dict) else self.active_approval
+                    if awaiting and isinstance(ar, dict):
+                        self.active_approval = ar
+                    else:
+                        # Onay işlendi / sprint bitti — eski pending dict'i tutmayın
+                        self.active_approval = None
         elif event_type in {"plan.approved", "plan.rejected", "plan.cancelled"} and self.active_approval:
             self.active_approval["status"] = event_type.split(".")[1]
         else:
@@ -147,6 +156,9 @@ class OrchestratorCLIApp(App[None]):
         elif event_type == "sprint.completed":
             result = body.get("result", "approved")
             self.current_state["sprint_status"] = result
+            self.active_approval = None
+            self.current_state["approval_request"] = None
+            self.current_state["awaiting_approval"] = False
         elif event_type == "system.heartbeat":
             self.current_state["last_heartbeat_at"] = payload.get("timestamp")
         elif event_type == "system.stalled":

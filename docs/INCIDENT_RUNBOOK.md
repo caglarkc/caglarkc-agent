@@ -39,7 +39,7 @@ Belirti:
 Adimlar:
 1. `logs/orchestrator.log` icinde `duplicate_event_id` veya `duplicate_idempotency_key` kaydini ara.
 2. `GraphManager` replay-safe davranisi aktifse ikinci islem `no-op` olmalidir.
-3. Suphede `./.venv/bin/python -m scripts.check_phase7` kos; replay-safe acceptance bunu dogrular.
+3. Suphede `./.venv/bin/python scripts/check_phase7.py` (projekokunden, `PYTHONPATH=.` ile) kos; ayrintilar `docs/PHASE_ACCEPTANCE.md` ve `scripts/run_phase_checks.py`.
 
 ## 5. Restore Sonrasi Resume Calismiyor
 Belirti:
