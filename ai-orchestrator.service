@@ -2,6 +2,8 @@
 Description=AI Development Team Orchestrator Daemon
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -12,7 +14,9 @@ ExecStart=/home/caglarkc/Desktop/Github/caglarkc-agent/.venv/bin/python /home/ca
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGTERM
+TimeoutStartSec=45
 TimeoutStopSec=30
+NoNewPrivileges=true
 StandardOutput=append:/home/caglarkc/Desktop/Github/caglarkc-agent/logs/systemd.log
 StandardError=append:/home/caglarkc/Desktop/Github/caglarkc-agent/logs/systemd.log
 
