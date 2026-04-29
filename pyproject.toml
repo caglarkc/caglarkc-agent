@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-development-team-orchestrator"
+version = "0.1.0"
+description = "Phase 1 infrastructure for the AI Development Team Orchestrator."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiofiles>=24.1.0,<25.0.0",
+    "aiosqlite>=0.20.0,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "langgraph>=1.0.0,<2.0.0",
+    "langgraph-checkpoint-sqlite>=2.0.0,<3.0.0",
+    "pydantic>=2.7.0,<3.0.0",
+    "pydantic-settings>=2.2.1,<3.0.0",
+    "rich>=13.7.1,<14.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0,<9.0.0",
+    "pytest-asyncio>=0.23.6,<1.0.0",
+]
+
+[project.scripts]
+smoke-test = "scripts.check_connections:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "scripts*"]
