@@ -4,10 +4,14 @@ from copy import deepcopy
 
 from src.core.contracts import new_event
 from src.core.event_bus import EventBus
+from src.core.project_manager import ProjectManager
 from src.core.state_transaction import StateTransaction
+from src.storage.repository import Repository
 
 
 async def reviewer_node(state: dict) -> dict:
+    repository = Repository()
+    await repository.initialize()
     project_id = state["project_id"]
     thread_id = state["current_thread_id"]
     sprint_id = f"sprint-{state.get('current_sprint', 1)}"
@@ -48,6 +52,7 @@ async def reviewer_node(state: dict) -> dict:
                 "errors": [*state.get("errors", []), *validation_issues],
                 "messages": [*state.get("messages", []), "reviewer failed after max cycles"],
             }
+            await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="fail", review_cycles=review_cycles)
         else:
             for issue in validation_issues:
                 for item in queue:
@@ -73,12 +78,20 @@ async def reviewer_node(state: dict) -> dict:
                 "review_cycles": review_cycles,
                 "messages": [*state.get("messages", []), "reviewer requested revision"],
             }
+            await repository.update_sprint_status(
+                project_id,
+                state.get("current_sprint", 1),
+                status="revision",
+                review_cycles=review_cycles,
+                revision_note="validator issues present",
+            )
     elif pending_items:
         updates = {
             "sprint_status": "active",
             "review_cycles": review_cycles,
             "messages": [*state.get("messages", []), "reviewer found pending work"],
         }
+        await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="active", review_cycles=review_cycles)
     elif all(status == "done" for status in file_registry.values()):
         await EventBus().emit(
             "sprint.completed",
@@ -97,7 +110,18 @@ async def reviewer_node(state: dict) -> dict:
             "messages": [*state.get("messages", []), "reviewer approved sprint"],
             "validation_issues": [],
             "revision_tasks": [],
+            "contract_completed": state.get("contract_completed", False) or state.get("sprint_type") == "contract",
         }
+        await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="approved", review_cycles=review_cycles)
+        await ProjectManager().update_plan_snapshot(
+            state["project_name"],
+            sprint_number=state.get("current_sprint", 1),
+            sprint_type=state.get("sprint_type", "feature"),
+            status="approved",
+            files=list(file_registry.keys()),
+            dependencies=state.get("dependencies", {}),
+            plan_version=state.get("plan_version", 1),
+        )
     else:
         updates = {
             "sprint_status": "fail",
@@ -108,6 +132,7 @@ async def reviewer_node(state: dict) -> dict:
             ],
             "messages": [*state.get("messages", []), "reviewer detected deadlock"],
         }
+        await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="fail", review_cycles=review_cycles)
 
     async with StateTransaction(project_id) as transaction:
         persisted = transaction.state
