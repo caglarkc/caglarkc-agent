@@ -15,7 +15,7 @@ HELP_TEXT = "\n".join(
     [
         "/task <metin>",
         "/status",
-        "/approve [approval_id]",
+        "/approve [approval_id]  (yalnızca olay günlüğünde plan onayı istendiğinde veya Approval panelde ID varken)",
         "/reject [approval_id] [reason]",
         "/cancel [approval_id] [reason]",
         "/projects",
@@ -143,7 +143,14 @@ async def _handle_approval_command(command: ParsedCommand, context: CommandConte
     if approval_id is None and active is not None:
         approval_id = active.get("approval_id")
     if not approval_id:
-        return CommandOutcome(ok=False, message="No active approval found.", level="warning")
+        return CommandOutcome(
+            ok=False,
+            message=(
+                "Bekleyen plan onayı yok. Akış: /task → günlükte 'Plan üretildi — onay gerekli' "
+                "mesajını ve Approval paneldeki ID'yi görmelisin; sprint zaten bittiyse /approve gerekmez."
+            ),
+            level="warning",
+        )
 
     guard = context.graph_manager.approval_guard if context.graph_manager is not None else None
     if guard is not None:

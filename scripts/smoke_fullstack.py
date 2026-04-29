@@ -12,11 +12,8 @@ from src.core.approval_guard import ApprovalGuard
 from src.core.contracts import new_event
 from src.core.event_bus import EventBus
 from src.core.graph_manager import GraphManager
-from src.core.project_manager import ProjectManager
 from src.core.scheduler import FairScheduler, ScheduledTask
 from src.core.state_manager import StateManager
-from src.graph.graph import build_thread_config
-from src.graph.state import build_initial_state
 from src.interfaces.cli.commands import CommandContext, execute_command
 from src.interfaces.cli.notifier import CLINotifier
 from src.interfaces.telegram.handlers import TelegramHandlerContext, handle_task
@@ -77,7 +74,6 @@ async def check_fullstack_flow() -> CheckResult:
     bus, state_manager = await reset_singletons()
     repository = Repository()
     await repository.initialize()
-    manager = ProjectManager(repository)
     graph_manager = GraphManager(
         event_bus=bus,
         state_manager=state_manager,
@@ -90,24 +86,6 @@ async def check_fullstack_flow() -> CheckResult:
     project = Project(project_id="fs-project", name="fullstack-alpha", description="Fullstack smoke", status="active")
     await repository.upsert_project(project.model_copy(update={"metadata": {"selected": True}}))
 
-    task_started = asyncio.Event()
-
-    async def on_task(payload: dict) -> None:
-        thread_id = f"thread-{uuid4()}"
-        config = build_thread_config(thread_id)
-        graph_manager.register_project_thread(project.project_id, thread_id, config)
-        initial = build_initial_state(
-            project_name=project.name,
-            task_description=payload["payload"]["task_description"],
-            project_id=project.project_id,
-            current_thread_id=thread_id,
-        )
-        await graph_manager.graph.ainvoke(initial, config=config)
-        snapshot = await graph_manager.graph.aget_state(config)
-        await state_manager.set(project.project_id, snapshot.values)
-        task_started.set()
-
-    await bus.subscribe("task.received", on_task)
     command_context = CommandContext(
         event_bus=bus,
         graph_manager=graph_manager,
@@ -117,7 +95,6 @@ async def check_fullstack_flow() -> CheckResult:
         active_approval=None,
     )
     task_outcome = await execute_command("/task build a smoke project", command_context)
-    await asyncio.wait_for(task_started.wait(), timeout=10)
     state = await state_manager.get(project.project_id)
     approval_id = state["approval_request"]["approval_id"]
     command_context.current_state = state

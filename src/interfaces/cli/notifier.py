@@ -31,10 +31,31 @@ class CLINotifier:
         return self._push("error", message, event_type=event_type)
 
     def from_event(self, event_type: str, payload: dict[str, Any] | None = None) -> Notification:
-        message = payload.get("payload", {}) if isinstance(payload, dict) else {}
+        body = payload.get("payload", {}) if isinstance(payload, dict) else {}
+        if event_type == "plan.approval_needed" and isinstance(body, dict):
+            aid = body.get("approval_id", "")
+            return self.info(
+                f"Plan üretildi — onay gerekli. Komut: /approve {aid}",
+                event_type=event_type,
+            )
+        if event_type == "sprint.completed" and isinstance(body, dict):
+            result = body.get("result", "")
+            files = body.get("files") or body.get("issues")
+            extra = f" | dosyalar={files}" if files else ""
+            return self.info(f"Sprint bitti: {result}{extra}", event_type=event_type)
+        if event_type == "snapshot.synced" and isinstance(body, dict):
+            return self.info(
+                f"Durum senkron: proje={body.get('project_id')} | {body.get('phase')}",
+                event_type=event_type,
+            )
+        if event_type == "error.occurred" and isinstance(body, dict):
+            return self.error(
+                f"Hata: {body.get('reason', 'unknown')} — {body.get('detail', '')}".strip(),
+                event_type=event_type,
+            )
         suffix = ""
-        if isinstance(message, dict) and message:
-            key_bits = ", ".join(f"{key}={value}" for key, value in list(message.items())[:3])
+        if isinstance(body, dict) and body:
+            key_bits = ", ".join(f"{key}={value}" for key, value in list(body.items())[:3])
             suffix = f" | {key_bits}"
         return self.info(f"{event_type}{suffix}", event_type=event_type)
 
