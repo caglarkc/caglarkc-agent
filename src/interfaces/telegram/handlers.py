@@ -73,15 +73,16 @@ async def handle_task(update: Any, telegram_context: TelegramHandlerContext) -> 
         await update.effective_message.reply_text("Kullanim: /task <metin>")
         return
     state = await _latest_state(telegram_context.state_manager) or {}
+    active_project = await ProjectManager().active_project()
     task_text = parts[1].strip()
     await telegram_context.event_bus.publish(
         "task.received",
         new_event(
             "task.received",
             payload={"task_description": task_text},
-            project_id=state.get("project_id"),
+            project_id=(active_project.project_id if active_project else state.get("project_id")),
             thread_id=state.get("current_thread_id"),
-            correlation_id=state.get("project_id"),
+            correlation_id=(active_project.project_id if active_project else state.get("project_id")),
         ).model_dump(),
     )
     await update.effective_message.reply_text(f"Gorev alindi: {task_text}")
