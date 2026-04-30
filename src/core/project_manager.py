@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import aiofiles
 import aiofiles.os
@@ -102,6 +103,25 @@ class ProjectManager:
         if project is not None:
             return project
         return await self._repository.get_project_by_name(project_ref)
+
+    async def create_project(self, name: str, *, description: str = "", selected: bool = True) -> Project:
+        await self._repository.initialize()
+        clean_name = " ".join(name.split())
+        if not clean_name:
+            raise ValueError("project name is required")
+        project = Project(
+            project_id=f"proj-{uuid4().hex[:12]}",
+            name=clean_name,
+            description=description or clean_name,
+            status="active",
+            metadata={"selected": selected},
+        )
+        await self._repository.upsert_project(project)
+        await self.ensure_project_structure(project.name)
+        if selected:
+            await self.select_active_project(project.project_id)
+            project = await self._repository.get_project(project.project_id) or project
+        return project
 
     async def select_active_project(self, project_id: str) -> Project | None:
         await self._repository.initialize()
