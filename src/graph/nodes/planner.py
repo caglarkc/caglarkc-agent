@@ -109,8 +109,17 @@ async def planner_node(state: dict) -> dict:
 
 
 async def _manager_planner_node(state: dict) -> dict:
-    project_id = state["project_id"]
-    thread_id = state["current_thread_id"]
+    import logging
+    _log = logging.getLogger(__name__)
+    project_id = state.get("project_id")
+    if not project_id:
+        _log.error("planner: state missing project_id — aborting")
+        return {
+            "messages": ["planner aborted: missing project_id"],
+            "errors": [{"type": "missing_state_fields", "detail": "project_id not in state"}],
+            "planning_status": "failed",
+        }
+    thread_id = state.get("current_thread_id") or state.get("planning_thread_id") or ""
     repository = Repository()
     project_manager = ProjectManager()
     await repository.initialize()
@@ -352,8 +361,17 @@ async def _manager_planner_node(state: dict) -> dict:
 
 
 async def _legacy_planner_node(state: dict) -> dict:
-    project_id = state["project_id"]
-    thread_id = state["current_thread_id"]
+    import logging
+    _log = logging.getLogger(__name__)
+    project_id = state.get("project_id")
+    if not project_id:
+        _log.error("legacy_planner: state missing project_id — aborting")
+        return {
+            "messages": ["legacy_planner aborted: missing project_id"],
+            "errors": [{"type": "missing_state_fields", "detail": "project_id not in state"}],
+            "planning_status": "failed",
+        }
+    thread_id = state.get("current_thread_id") or state.get("planning_thread_id") or ""
     repository = Repository()
     project_manager = ProjectManager()
     await repository.initialize()
