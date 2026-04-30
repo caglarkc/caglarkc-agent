@@ -190,7 +190,7 @@ Approval yokken aktif planning task'ini iptal et:
 /cancel <neden>
 ```
 
-Bu komutlardan sonra sonraki `/task ...` yeni `thread-...` ile baslar.
+Bu komutlardan sonra sonraki `/r ...` veya legacy `/task ...` yeni `thread-...` ile baslar.
 
 ## CLI Komutlari
 
