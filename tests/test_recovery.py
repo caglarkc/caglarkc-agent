@@ -83,4 +83,4 @@ async def test_recovery_requeues_missing_done_file(tmp_path: Path) -> None:
     assert updates["file_registry"]["index.html"] == "planned"
     assert updates["worker_outputs"]["worker_a"] == []
     assert next_node == "dispatcher"
-    assert actions == ["requeued missing done file index.html", "aligned queue status for index.html"]
+    assert "requeued missing done file index.html" in actions

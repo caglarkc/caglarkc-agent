@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from typing import Literal
 
@@ -94,7 +95,7 @@ class ManagerPlanningService:
                 existing_draft=draft,
                 execution_intent=normalized_intent,
             )
-        if not self._settings.gemini_api_key:
+        if not self._settings.gemini_api_key and self._model is None:
             return ManagerPlanningResult(
                 reply_text=(
                     "Planning mode hazir ama Gemini baglantisi icin `GEMINI_API_KEY` eksik. "
@@ -432,6 +433,18 @@ def _normalize_plan_for_request(
     combined = " ".join([turn.content for turn in conversation_history if turn.role == "user"] + [user_message]).lower()
     wants_frontend = any(keyword in combined for keyword in ("restoran", "restaurant", "site", "web", "landing"))
     wants_three_workers = any(keyword in combined for keyword in ("3 ai", "üç ai", "uc ai", "3 ayrı", "üç ayrı", "uc ayri", "three"))
+    if wants_frontend:
+        frontend_suffixes = {".html", ".css", ".js"}
+        normalized_files = []
+        changed = False
+        for item in plan.files:
+            if Path(item.path).suffix.lower() in frontend_suffixes and item.dependencies:
+                normalized_files.append(item.model_copy(update={"dependencies": []}))
+                changed = True
+            else:
+                normalized_files.append(item)
+        if changed:
+            plan = PlanDraft(summary=plan.summary, sprint_type=plan.sprint_type or "feature", files=normalized_files)
     if not wants_frontend or not wants_three_workers or len(plan.files) >= 3:
         return plan
     return PlanDraft(
