@@ -94,7 +94,7 @@ async def check_fullstack_flow() -> CheckResult:
         active_approval=None,
     )
     new_outcome = await execute_command("/new fullstack-alpha", command_context)
-    chat_outcome = await execute_command("/r build a smoke web project", command_context)
+    chat_outcome = await execute_command("/r add a smoke module", command_context)
     project_id = command_context.current_state["project_id"]
     state = await state_manager.get(project_id)
     command_context.current_state = state
