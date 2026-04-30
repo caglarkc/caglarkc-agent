@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     use_legacy_planner: bool = Field(default=False, alias="USE_LEGACY_PLANNER")
 
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", alias="OLLAMA_BASE_URL")
-    ollama_model: str = Field(default="qwen2.5:latest", alias="OLLAMA_MODEL")
+    ollama_model: str = Field(default="", alias="OLLAMA_MODEL")
 
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1",

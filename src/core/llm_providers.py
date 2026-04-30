@@ -143,24 +143,24 @@ def _related_file_snapshots(state: dict, target_file: str) -> str:
 def _worker_model_config(worker_id: str, settings: Settings) -> WorkerModelConfig:
     if worker_id == "worker_a":
         return WorkerModelConfig(
-            provider="ollama",
-            model_name=settings.ollama_model,
-            auth_available=bool(settings.ollama_model),
-            missing_auth_message="OLLAMA_MODEL is not configured",
-        )
-    if worker_id == "worker_b":
-        return WorkerModelConfig(
             provider="openrouter_primary",
             model_name=settings.openrouter_model,
             auth_available=bool(settings.openrouter_api_key_primary),
             missing_auth_message="OPENROUTER_API_KEY_PRIMARY is missing",
         )
-    if worker_id == "worker_c":
+    if worker_id == "worker_b":
         return WorkerModelConfig(
             provider="openrouter_secondary",
             model_name=settings.openrouter_model_secondary,
             auth_available=bool(settings.openrouter_api_key_secondary),
             missing_auth_message="OPENROUTER_API_KEY_SECONDARY is missing",
+        )
+    if worker_id == "worker_c":
+        return WorkerModelConfig(
+            provider="openrouter_primary",
+            model_name=settings.openrouter_model,
+            auth_available=bool(settings.openrouter_api_key_primary),
+            missing_auth_message="OPENROUTER_API_KEY_PRIMARY is missing",
         )
     if settings.gemini_api_key:
         return WorkerModelConfig(provider="gemini", model_name=settings.gemini_model)
@@ -376,10 +376,8 @@ async def _direct_chat_response(config: WorkerModelConfig, settings: Settings, s
 
 
 def _fallback_chain(settings: Settings) -> list[WorkerModelConfig]:
-    """Returns providers in priority order: Ollama -> OpenRouter primary -> OpenRouter secondary -> Gemini."""
+    """Returns providers in priority order while local Ollama is disabled."""
     chain = []
-    if settings.ollama_model:
-        chain.append(WorkerModelConfig(provider="ollama", model_name=settings.ollama_model))
     if settings.openrouter_api_key_primary:
         chain.append(WorkerModelConfig(provider="openrouter_primary", model_name=settings.openrouter_model))
     if settings.openrouter_api_key_secondary:
