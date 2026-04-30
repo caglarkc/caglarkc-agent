@@ -150,8 +150,8 @@ async def _check_dom_consistency(project_root: Path, html_files: list[str], css_
                 issues.append(f"{js_file} references missing HTML id #{element_id}")
                 issue_targets.update({js_file, html_files[0]})
         for selector in re.findall(r"""querySelector(?:All)?\s*\(\s*["']([^"']+)["']\s*\)""", js_content):
-            selector_ids = re.findall(r"#([A-Za-z_][\\w\\-]*)", selector)
-            selector_classes = re.findall(r"\\.([A-Za-z_][\\w\\-]*)", selector)
+            selector_ids = re.findall(r"#([A-Za-z_][\w\-]*)", selector)
+            selector_classes = re.findall(r"\.([A-Za-z_][\w\-]*)", selector)
             missing_ids = [element_id for element_id in selector_ids if element_id not in html_ids]
             missing_classes = [class_name for class_name in selector_classes if class_name not in html_classes]
             if missing_ids:
