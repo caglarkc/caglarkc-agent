@@ -332,3 +332,34 @@ async def test_scan_command_renders_health_metrics(monkeypatch: pytest.MonkeyPat
     assert "tok/s=6.23" in outcome.message
     assert "response='pong'" in outcome.message
     assert "✗ openrouter_primary  model-x  api_key_missing" in outcome.message
+
+
+@pytest.mark.asyncio
+async def test_start_command_approves_pending_plan() -> None:
+    event_bus = FakeEventBus()
+    state_manager = FakeStateManager()
+    state = {
+        "project_id": "project-1",
+        "project_name": "Demo",
+        "current_thread_id": "thread-1",
+        "planning_thread_id": "thread-1",
+        "planning_status": "awaiting_approval",
+        "awaiting_approval": True,
+        "approval_request": {"approval_id": "approval-1", "thread_id": "thread-1", "project_id": "project-1"},
+    }
+    state_manager.state["project-1"] = state
+    context = CommandContext(
+        event_bus=event_bus,
+        graph_manager=None,
+        notifier=CLINotifier(),
+        state_manager=state_manager,
+        current_state=state,
+        active_approval=state["approval_request"],
+    )
+
+    outcome = await execute_command("/start", context)
+
+    assert outcome.ok is True
+    event_name, payload = event_bus.events[0]
+    assert event_name == "plan.approved"
+    assert payload["payload"]["approval_id"] == "approval-1"
