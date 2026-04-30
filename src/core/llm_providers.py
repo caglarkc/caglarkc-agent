@@ -201,8 +201,6 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
         output_rules.append("The output must be valid JSON.")
     if suffix == ".py":
         output_rules.append("The output must be valid Python syntax with only standard-library or local imports.")
-<<<<<<< Updated upstream
-=======
     if suffix in {".html", ".css", ".js"}:
         output_rules.extend(
             [
@@ -224,7 +222,6 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
         )
     execution_context = state.get("execution_results", [])[-8:]
     related_snapshots = _related_file_snapshots(state, target_file)
->>>>>>> Stashed changes
 
     system_prompt = (
         "You are a careful code-generation worker inside an orchestrated software team. "
@@ -248,8 +245,6 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
             "Context summary:",
             _compact_text(state.get("context_summary"), max_chars=CONTEXT_MAX_CHARS),
             "",
-<<<<<<< Updated upstream
-=======
             "Previous validation/runtime feedback for this target:",
             "\n".join(issue_lines) if issue_lines else "None",
             "",
@@ -259,7 +254,6 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
             "Current related file snapshots:",
             related_snapshots,
             "",
->>>>>>> Stashed changes
             "Generate only the raw file body now.",
         ]
     )
