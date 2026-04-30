@@ -395,11 +395,11 @@ def _heuristic_draft_from_message(user_message: str, *, existing_draft: PlanDraf
             PlannedFile(path="tests/test_api.py", description="Cover the main API flow.", dependencies=["app.py"], task_type="test_file"),
         ]
         return PlanDraft(summary=text, sprint_type="feature", files=files)
-    if "site" in lowered or "landing" in lowered or "web" in lowered:
+    if "restoran" in lowered or "restaurant" in lowered or "site" in lowered or "landing" in lowered or "web" in lowered:
         files = [
-            PlannedFile(path="app.py", description="Create the main site entrypoint.", dependencies=[], task_type="frontend_entry"),
-            PlannedFile(path="templates/index.html", description="Build the main page template.", dependencies=["app.py"], task_type="frontend_template"),
-            PlannedFile(path="static/styles.css", description="Style the site experience.", dependencies=["templates/index.html"], task_type="frontend_style"),
+            PlannedFile(path="index.html", description="Build the restaurant landing page markup.", dependencies=[], task_type="frontend_markup"),
+            PlannedFile(path="styles.css", description="Style the restaurant site with responsive layout.", dependencies=[], task_type="frontend_style"),
+            PlannedFile(path="script.js", description="Add lightweight menu/reservation interactions.", dependencies=[], task_type="frontend_script"),
         ]
         return PlanDraft(summary=text, sprint_type="feature", files=files)
     if "modul" in lowered or "module" in lowered or "ekle" in lowered or "add" in lowered:
