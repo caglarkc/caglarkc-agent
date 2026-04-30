@@ -56,6 +56,7 @@ HELP_TEXT = "\n".join(
         "/resume [project_id veya proje adi]",
         "/r <mesaj>",
         "/plan [project_id veya proje adi]",
+        "/start [project_id veya proje adi]",
         "/apply [istege bagli not]",
         "/status",
         "/approve [approval_id]  (yalnızca olay günlüğünde plan onayı istendiğinde veya Approval panelde ID varken)",
@@ -121,6 +122,8 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
         return await _publish_chat_message(command, context, command_name="/r")
     if command.name == "plan":
         return await _handle_plan_command(command, context)
+    if command.name == "start":
+        return await _handle_start_command(command, context)
     if command.name == "task":
         return await _publish_chat_message(command, context, command_name="/task")
     if command.name == "apply":
@@ -332,6 +335,29 @@ async def _handle_plan_command(command: ParsedCommand, context: CommandContext) 
         ).model_dump(),
     )
     return CommandOutcome(ok=True, message=f"Planning requested [{thread_id}]: {project.project_id} | {project.name}")
+
+
+async def _handle_start_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    project_ref = " ".join(command.args).strip() or None
+    try:
+        project, state = await _select_project_state(context, project_ref)
+    except LookupError:
+        return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+    approval = state.get("approval_request")
+    if not state.get("awaiting_approval") or not isinstance(approval, dict):
+        return CommandOutcome(
+            ok=False,
+            message="Baslatilacak onayli plan yok. Once /plan [proje] ile plan olustur.",
+            level="warning",
+        )
+    approval_id = approval.get("approval_id")
+    if not approval_id:
+        return CommandOutcome(ok=False, message="Approval ID bulunamadi. /plan komutunu tekrar calistir.", level="warning")
+    event = ParsedCommand(name="approve", args=[approval_id], raw=f"/approve {approval_id}")
+    outcome = await _handle_approval_command(event, context)
+    if outcome.ok:
+        return CommandOutcome(ok=True, message=f"Started plan [{state.get('current_thread_id')}]: {project.project_id} | {project.name}")
+    return outcome
 
 
 async def _handle_history_command(command: ParsedCommand) -> CommandOutcome:
