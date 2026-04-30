@@ -181,3 +181,37 @@ async def test_manager_planning_sends_history_and_existing_draft_to_gemini() -> 
     assert "Taslak hazir." in prompt_payload
     assert "app.py" in prompt_payload
     assert "renkleri koyulastir" in prompt_payload
+
+
+@pytest.mark.asyncio
+async def test_manager_planning_normalizes_frontend_three_worker_plan() -> None:
+    service = ManagerPlanningService(
+        settings=Settings(
+            manager_use_gemini=True,
+            gemini_api_key="test-key",
+            manager_model="gemini-test",
+        ),
+        model=FakeModel(
+            [
+                (
+                    '{"reply_text":"Plan hazir.","needs_clarification":false,'
+                    '"execution_intent":"apply","plan":{"summary":"Restaurant site","sprint_type":"feature",'
+                    '"files":[{"path":"index.html","description":"Markup","dependencies":[],"task_type":"frontend_markup"},'
+                    '{"path":"style.css","description":"Styles","dependencies":[],"task_type":"frontend_style"}]}}'
+                ),
+            ]
+        ),
+    )
+
+    result = await service.process_turn(
+        user_message="Restoran sitesi icin plan yap. Uc ayri AI worker gorevine bol.",
+        conversation_history=[
+            {"role": "user", "content": "Modern restoran web sitesi istiyorum."},
+        ],
+        existing_draft=None,
+        explicit_execution=True,
+    )
+
+    assert result.draft_plan is not None
+    assert [item.path for item in result.draft_plan.files] == ["index.html", "styles.css", "script.js"]
+    assert all(item.dependencies == [] for item in result.draft_plan.files)
