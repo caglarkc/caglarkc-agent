@@ -138,6 +138,39 @@ async def test_manager_planning_falls_back_when_gemini_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_manager_planning_normalizes_fallback_with_conversation_history() -> None:
+    service = ManagerPlanningService(
+        settings=Settings(
+            manager_use_gemini=True,
+            gemini_api_key="test-key",
+            manager_model="gemini-test",
+            http_timeout_seconds=0.1,
+        ),
+        model=FailingModel(),
+    )
+
+    result = await service.process_turn(
+        user_message="Bu sohbet gecmisini planlama moduna gecir.",
+        conversation_history=[
+            {"role": "user", "content": "Modern restoran web sitesi istiyorum."},
+            {"role": "user", "content": "Uc ayri AI worker gorevine bol."},
+        ],
+        existing_draft={
+            "summary": "generic module",
+            "sprint_type": "feature",
+            "files": [
+                {"path": "src/module.py", "description": "Module", "dependencies": [], "task_type": "feature_module"},
+                {"path": "tests/test_module.py", "description": "Tests", "dependencies": [], "task_type": "test_file"},
+            ],
+        },
+        explicit_execution=True,
+    )
+
+    assert result.draft_plan is not None
+    assert [item.path for item in result.draft_plan.files] == ["index.html", "styles.css", "script.js"]
+
+
+@pytest.mark.asyncio
 async def test_manager_planning_sends_history_and_existing_draft_to_gemini() -> None:
     model = FakeModel(
         [
