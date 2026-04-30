@@ -21,7 +21,7 @@ async def worker_node(state: dict) -> dict:
     active_assignment = state.get("active_assignment")
     if active_assignment is None:
         return {
-            "messages": [*state.get("messages", []), "worker skipped because no active assignment exists"],
+            "messages": ["worker skipped because no active assignment exists"],
         }
 
     assignment = DispatchAssignment.model_validate(active_assignment)
@@ -48,8 +48,8 @@ async def worker_node(state: dict) -> dict:
         )
         return {
             "reservation_conflicts": reservation_conflicts,
-            "errors": [*state.get("errors", []), {"type": "reservation_conflict", "target_file": target_file}],
-            "messages": [*state.get("messages", []), f"worker rejected conflicting write for {target_file}"],
+            "errors": [{"type": "reservation_conflict", "target_file": target_file}],
+            "messages": [f"worker rejected conflicting write for {target_file}"],
         }
 
     try:
@@ -128,7 +128,6 @@ async def worker_node(state: dict) -> dict:
             "contract_completed": state.get("contract_completed", False)
             or (state.get("sprint_type") == "contract" and all(status == "done" for status in file_registry.values())),
             "messages": [
-                *state.get("messages", []),
                 f"worker completed {target_file} via {generated.provider}"
                 + (f" fallback ({generated.fallback_reason})" if generated.used_stub else ""),
             ],
@@ -192,8 +191,8 @@ async def worker_node(state: dict) -> dict:
                 recommendation="reassign to alternate worker" if classification.retryable else "fix input or contract before retry",
             )
         )
-        errors = [*state.get("errors", []), {"type": "worker_failure", "target_file": target_file, "error": str(exc)}]
-        messages = [*state.get("messages", []), f"worker failed {target_file}"]
+        errors = [{"type": "worker_failure", "target_file": target_file, "error": str(exc)}]
+        messages = [f"worker failed {target_file}"]
         if not classification.retryable or retry_count >= RetryPolicy().max_retry:
             await EventBus().emit(
                 "worker.failed",

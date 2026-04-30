@@ -119,7 +119,7 @@ async def _manager_planner_node(state: dict) -> dict:
     sprint_id = f"sprint-{current_sprint}"
     conversation_history = list(state.get("conversation_history", []))
     current_message = str(state.get("task_description", "") or "").strip()
-    if current_message:
+    if current_message and not state.get("suppress_user_turn"):
         user_turn = PlanConversationTurn(role="user", content=current_message).model_dump()
         if not conversation_history or conversation_history[-1].get("role") != "user" or conversation_history[-1].get("content") != current_message:
             conversation_history.append(user_turn)
@@ -138,6 +138,9 @@ async def _manager_planner_node(state: dict) -> dict:
     dependencies: dict[str, list[str]] = {}
     file_registry: dict[str, str] = {}
     file_list: list[str] = []
+    planned_worker_queue: list[dict] = []
+    planned_dependencies: dict[str, list[str]] = {}
+    planned_file_registry: dict[str, str] = {}
     approval_request = None
     awaiting_approval = False
     approval_type = ""
@@ -163,13 +166,13 @@ async def _manager_planner_node(state: dict) -> dict:
     )
 
     if planning_result.draft_plan is not None:
-        worker_queue, dependencies, file_registry = draft_to_queue(
+        planned_worker_queue, planned_dependencies, planned_file_registry = draft_to_queue(
             planning_result.draft_plan,
             project_id=project_id,
             thread_id=thread_id,
             sprint_id=sprint_id,
         )
-        file_list = list(file_registry.keys())
+        file_list = list(planned_file_registry.keys())
         await EventBus().emit(
             "plan.draft_updated",
             new_event(
@@ -188,11 +191,14 @@ async def _manager_planner_node(state: dict) -> dict:
         )
 
     if planning_result.execution_intent.mode == "apply" and planning_result.draft_plan is not None:
+        worker_queue = planned_worker_queue
+        dependencies = planned_dependencies
+        file_registry = planned_file_registry
         if _detect_cycle(dependencies):
             return {
                 "sprint_status": "fail",
-                "errors": [*state.get("errors", []), {"type": "dependency_cycle", "dependencies": dependencies}],
-                "messages": [*state.get("messages", []), "planner detected dependency cycle"],
+                "errors": [{"type": "dependency_cycle", "dependencies": dependencies}],
+                "messages": ["planner detected dependency cycle"],
                 "conversation_history": conversation_history,
                 "manager_reply": planning_result.reply_text,
                 "planning_status": "invalid_plan",
@@ -322,8 +328,9 @@ async def _manager_planner_node(state: dict) -> dict:
         "planning_status": planning_status,
         "planning_thread_id": thread_id,
         "execution_requested": False,
-        "messages": [*state.get("messages", []), "planner completed"],
-        "errors": state.get("errors", []),
+        "suppress_user_turn": False,
+        "messages": ["planner completed"],
+        "errors": [],
         "validation_issues": [],
         "revision_tasks": [],
         "active_assignment": None,
@@ -356,9 +363,9 @@ async def _legacy_planner_node(state: dict) -> dict:
     requested_feature = state.get("requested_sprint_type") == "feature"
     sprint_type = "contract" if current_sprint == 1 and not state.get("contract_completed") else "feature"
     if requested_feature and sprint_type == "contract":
-        state_messages = [*state.get("messages", []), "feature sprint request gated until contract sprint completes"]
+        state_messages = ["feature sprint request gated until contract sprint completes"]
     else:
-        state_messages = [*state.get("messages", [])]
+        state_messages = []
 
     if sprint_type == "contract":
         queue, dependencies = _contract_queue(project_id, thread_id, sprint_id)
@@ -373,7 +380,7 @@ async def _legacy_planner_node(state: dict) -> dict:
     if _detect_cycle(dependencies):
         updates = {
             "sprint_status": "fail",
-            "errors": [*state.get("errors", []), {"type": "dependency_cycle", "dependencies": dependencies}],
+            "errors": [{"type": "dependency_cycle", "dependencies": dependencies}],
             "messages": [*state_messages, "planner detected dependency cycle"],
         }
         async with StateTransaction(project_id) as transaction:
@@ -481,7 +488,7 @@ async def _legacy_planner_node(state: dict) -> dict:
         "approval_request": approval_request.model_dump(),
         "context_summary": context_summary,
         "messages": [*state_messages, "planner completed"],
-        "errors": state.get("errors", []),
+        "errors": [],
         "validation_issues": [],
         "revision_tasks": [],
         "active_assignment": None,

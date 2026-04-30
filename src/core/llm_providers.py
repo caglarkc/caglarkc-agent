@@ -73,7 +73,12 @@ def _compact_text(value: Any, *, max_chars: int = CONTEXT_MAX_CHARS) -> str:
 
 def _worker_model_config(worker_id: str, settings: Settings) -> WorkerModelConfig:
     if worker_id == "worker_a":
-        return WorkerModelConfig(provider="ollama", model_name=settings.ollama_model)
+        return WorkerModelConfig(
+            provider="ollama",
+            model_name=settings.ollama_model,
+            auth_available=bool(settings.ollama_model),
+            missing_auth_message="OLLAMA_MODEL is not configured",
+        )
     if worker_id == "worker_b":
         return WorkerModelConfig(
             provider="openrouter_primary",

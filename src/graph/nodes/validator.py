@@ -130,7 +130,7 @@ async def validator_node(state: dict) -> dict:
             {"target_file": issue["target_file"], "reason": issue["message"], "code": issue["code"]}
             for issue in validation_issues
         ],
-        "messages": [*state.get("messages", []), "validator completed"],
+        "messages": ["validator completed"],
     }
     async with StateTransaction(state["project_id"]) as transaction:
         persisted = transaction.state

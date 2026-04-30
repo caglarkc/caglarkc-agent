@@ -25,6 +25,25 @@ EXECUTION_KEYWORDS = (
     "ship it",
     "go build",
 )
+EXECUTION_NEGATION_PATTERNS = (
+    "kod yazma",
+    "kod yazmayalim",
+    "kod yazmayın",
+    "uygulama",
+    "baslatma",
+    "başlatma",
+    "henuz kod yazma",
+    "henüz kod yazma",
+    "henuz uygulama",
+    "henüz uygulama",
+    "do not implement",
+    "don't implement",
+    "dont implement",
+    "do not apply",
+    "don't apply",
+    "dont apply",
+    "not yet",
+)
 
 
 class PlanningModelResponse(BaseModel):
@@ -94,10 +113,11 @@ class ManagerPlanningService:
         )
         parsed = await self._parse_with_repair(raw_response)
         if parsed is None:
+            preview = (raw_response or "")[:200].replace("\n", " ")
             return ManagerPlanningResult(
                 reply_text=(
-                    "Plani yapisal olarak dogrulayamadim. Bir tur daha kapsam netlestirelim; "
-                    "simdilik worker akisi baslatilmadi."
+                    f"Gemini yaniti yapisal olarak gecersiz. Ham yanit: {preview!r}. "
+                    "Kapsami netlestirelim; worker akisi baslatilmadi."
                 ),
                 draft_plan=draft,
                 execution_intent=ExecutionIntent(
@@ -110,7 +130,7 @@ class ManagerPlanningService:
             )
 
         final_intent = ExecutionIntent(
-            mode="apply" if normalized_intent.mode == "apply" or parsed.execution_intent == "apply" else "discuss",
+            mode=normalized_intent.mode,
             explicit=normalized_intent.explicit,
             reason=normalized_intent.reason or parsed.execution_intent,
         )
@@ -291,7 +311,11 @@ class ManagerPlanningService:
 
 def detect_execution_intent(message: str, *, explicit: bool = False) -> ExecutionIntent:
     lowered = " ".join((message or "").lower().split())
-    if explicit or any(keyword in lowered for keyword in EXECUTION_KEYWORDS):
+    if explicit:
+        return ExecutionIntent(mode="apply", explicit=True, reason="explicit_execution_request")
+    if any(pattern in lowered for pattern in EXECUTION_NEGATION_PATTERNS):
+        return ExecutionIntent(mode="discuss", explicit=False, reason="execution_negated")
+    if any(keyword in lowered for keyword in EXECUTION_KEYWORDS):
         return ExecutionIntent(mode="apply", explicit=True, reason="explicit_execution_request")
     return ExecutionIntent(mode="discuss", explicit=False, reason="planning_default")
 

@@ -53,8 +53,8 @@ async def reviewer_node(state: dict) -> dict:
             updates = {
                 "sprint_status": "fail",
                 "review_cycles": review_cycles,
-                "errors": [*state.get("errors", []), *validation_issues],
-                "messages": [*state.get("messages", []), "reviewer failed after max cycles"],
+                "errors": [*validation_issues],
+                "messages": ["reviewer failed after max cycles"],
                 "reviewer_decision": "fail",
             }
             decision_summary = "Reviewer marked sprint as fail after max revision cycles."
@@ -87,7 +87,7 @@ async def reviewer_node(state: dict) -> dict:
                 "file_registry": file_registry,
                 "sprint_status": "revision",
                 "review_cycles": review_cycles,
-                "messages": [*state.get("messages", []), "reviewer requested revision"],
+                "messages": ["reviewer requested revision"],
                 "reviewer_decision": "revision",
             }
             decision_summary = "Reviewer requested revision for validator issues."
@@ -103,7 +103,7 @@ async def reviewer_node(state: dict) -> dict:
         updates = {
             "sprint_status": "active",
             "review_cycles": review_cycles,
-            "messages": [*state.get("messages", []), "reviewer found pending work"],
+            "messages": ["reviewer found pending work"],
             "reviewer_decision": "revision",
         }
         decision_summary = "Reviewer returned pending work to dispatcher."
@@ -124,7 +124,7 @@ async def reviewer_node(state: dict) -> dict:
         updates = {
             "sprint_status": "approved",
             "review_cycles": review_cycles,
-            "messages": [*state.get("messages", []), "reviewer approved sprint"],
+            "messages": ["reviewer approved sprint"],
             "validation_issues": [],
             "revision_tasks": [],
             "contract_completed": state.get("contract_completed", False) or state.get("sprint_type") == "contract",
@@ -147,10 +147,9 @@ async def reviewer_node(state: dict) -> dict:
             "sprint_status": "fail",
             "review_cycles": review_cycles,
             "errors": [
-                *state.get("errors", []),
                 {"type": "review_deadlock", "message": "No pending items completed successfully."},
             ],
-            "messages": [*state.get("messages", []), "reviewer detected deadlock"],
+            "messages": ["reviewer detected deadlock"],
             "reviewer_decision": "fail",
         }
         decision_summary = "Reviewer detected deadlock and failed sprint."
