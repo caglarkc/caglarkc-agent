@@ -446,14 +446,14 @@ class GraphManager:
             return
         await self.register_approval(approval_request)
 
-    async def on_plan_approved(self, raw_event: dict[str, Any]) -> None:
-        await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
+    async def on_plan_approved(self, raw_event: dict[str, Any]) -> ApprovalConsumeResult:
+        return await self._handle_decision_event(raw_event, expected_event_type="plan.approved")
 
-    async def on_plan_rejected(self, raw_event: dict[str, Any]) -> None:
-        await self._handle_decision_event(raw_event, expected_event_type="plan.rejected")
+    async def on_plan_rejected(self, raw_event: dict[str, Any]) -> ApprovalConsumeResult:
+        return await self._handle_decision_event(raw_event, expected_event_type="plan.rejected")
 
-    async def on_plan_cancelled(self, raw_event: dict[str, Any]) -> None:
-        await self._handle_decision_event(raw_event, expected_event_type="plan.cancelled")
+    async def on_plan_cancelled(self, raw_event: dict[str, Any]) -> ApprovalConsumeResult:
+        return await self._handle_decision_event(raw_event, expected_event_type="plan.cancelled")
 
     async def _handle_decision_event(
         self,
@@ -549,7 +549,7 @@ class GraphManager:
                 "approval_request": None,
                 "planning_status": "approved_for_execution",
                 "execution_requested": False,
-                "messages": [*snapshot.values.get("messages", []), f"approval accepted for {decision.approval_id}"],
+                "messages": [f"approval accepted for {decision.approval_id}"],
             },
             as_node="planner",
         )
@@ -585,8 +585,8 @@ class GraphManager:
                 "planning_status": terminal_status,
                 "execution_requested": False,
                 "sprint_status": "fail",
-                "errors": [*snapshot.values.get("errors", []), {"type": terminal_status, "approval_id": decision.approval_id}],
-                "messages": [*snapshot.values.get("messages", []), f"approval {terminal_status} for {decision.approval_id}"],
+                "errors": [{"type": terminal_status, "approval_id": decision.approval_id}],
+                "messages": [f"approval {terminal_status} for {decision.approval_id}"],
             },
             as_node="planner",
         )

@@ -1,5 +1,24 @@
 /.venv/
 **/__pycache__/
 *.py[cod]
-# Faz 1 graph smoke tarafından üretilen geçici checkpoint
-data/check_connections_graph.sqlite
+.env
+
+# Test checkpoint SQLite files
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite.bak
+data/fullstack-smoke-*/
+data/backup-restore-*/
+data/phase7-check-*/
+data/phase8-check-*/
+data/test_resume.sqlite
+
+# Runtime data
+data/state_snapshot.json
+data/daemon_status.json
+data/orchestrator.db
+logs/
+
+# Generated project outputs from tests
+projects/
