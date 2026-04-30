@@ -18,6 +18,11 @@ class FakeModel:
         return SimpleNamespace(content=self._responses.pop(0))
 
 
+class FailingModel:
+    async def ainvoke(self, messages):  # noqa: ANN001, ANN201
+        raise TimeoutError("provider timeout")
+
+
 @pytest.mark.asyncio
 async def test_manager_planning_repairs_invalid_json() -> None:
     service = ManagerPlanningService(
@@ -105,6 +110,31 @@ async def test_manager_planning_does_not_let_model_escalate_to_apply() -> None:
 
     assert result.execution_intent.mode == "discuss"
     assert result.draft_plan is not None
+
+
+@pytest.mark.asyncio
+async def test_manager_planning_falls_back_when_gemini_fails() -> None:
+    service = ManagerPlanningService(
+        settings=Settings(
+            manager_use_gemini=True,
+            gemini_api_key="test-key",
+            manager_model="gemini-test",
+            http_timeout_seconds=0.1,
+        ),
+        model=FailingModel(),
+    )
+
+    result = await service.process_turn(
+        user_message="restoran web sitesi yap ve uygula",
+        conversation_history=[],
+        existing_draft=None,
+        explicit_execution=True,
+    )
+
+    assert result.used_fallback is True
+    assert result.execution_intent.mode == "apply"
+    assert result.draft_plan is not None
+    assert result.error_message == "gemini_invoke_failed:TimeoutError"
 
 
 @pytest.mark.asyncio
