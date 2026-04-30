@@ -257,41 +257,67 @@ async def _direct_chat_response(config: WorkerModelConfig, settings: Settings, s
     return None
 
 
-async def generate_file_content(state: dict, assignment: DispatchAssignment) -> GeneratedFileContent:
-    settings = get_settings()
-    config = _worker_model_config(assignment.worker_id, settings)
-    if settings.worker_use_stub:
-        return GeneratedFileContent(
-            content=_render_stub_file_content(assignment.target_file, task_description=state.get("task_description", "")),
-            provider=config.provider,
-            model_name=config.model_name,
-            used_stub=True,
-            fallback_reason="WORKER_USE_STUB enabled",
-        )
-    if not config.auth_available:
-        return GeneratedFileContent(
-            content=_render_stub_file_content(assignment.target_file, task_description=state.get("task_description", "")),
-            provider=config.provider,
-            model_name=config.model_name,
-            used_stub=True,
-            fallback_reason=config.missing_auth_message,
-        )
+def _fallback_chain(settings: Settings) -> list[WorkerModelConfig]:
+    """Returns providers in priority order: Ollama -> OpenRouter primary -> OpenRouter secondary -> Gemini."""
+    chain = []
+    if settings.ollama_model:
+        chain.append(WorkerModelConfig(provider="ollama", model_name=settings.ollama_model))
+    if settings.openrouter_api_key_primary:
+        chain.append(WorkerModelConfig(provider="openrouter_primary", model_name=settings.openrouter_model))
+    if settings.openrouter_api_key_secondary:
+        chain.append(WorkerModelConfig(provider="openrouter_secondary", model_name=settings.openrouter_model_secondary))
+    if settings.gemini_api_key:
+        chain.append(WorkerModelConfig(provider="gemini", model_name=settings.gemini_model))
+    return chain
 
-    system_prompt, user_prompt = build_worker_prompt(state, assignment)
+
+async def _try_provider(config: WorkerModelConfig, settings: Settings, system_prompt: str, user_prompt: str) -> str:
     direct_content = await _direct_chat_response(config, settings, system_prompt, user_prompt)
     if direct_content is not None:
-        return GeneratedFileContent(
-            content=_strip_markdown_fence(_content_to_text(direct_content)),
-            provider=config.provider,
-            model_name=config.model_name,
-        )
+        return _strip_markdown_fence(_content_to_text(direct_content))
     model = _chat_model_for(config, settings)
     response = await asyncio.wait_for(
         model.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
         timeout=max(5.0, settings.http_timeout_seconds + 5.0),
     )
+    return _strip_markdown_fence(_content_to_text(response.content))
+
+
+async def generate_file_content(state: dict, assignment: DispatchAssignment) -> GeneratedFileContent:
+    settings = get_settings()
+    primary_config = _worker_model_config(assignment.worker_id, settings)
+
+    if settings.worker_use_stub:
+        return GeneratedFileContent(
+            content=_render_stub_file_content(assignment.target_file, task_description=state.get("task_description", "")),
+            provider=primary_config.provider,
+            model_name=primary_config.model_name,
+            used_stub=True,
+            fallback_reason="WORKER_USE_STUB enabled",
+        )
+
+    system_prompt, user_prompt = build_worker_prompt(state, assignment)
+    chain = _fallback_chain(settings)
+    last_error: Exception | None = None
+
+    for config in chain:
+        try:
+            content = await _try_provider(config, settings, system_prompt, user_prompt)
+            fallback_reason = f"fallback from {primary_config.provider}" if config.provider != primary_config.provider else None
+            return GeneratedFileContent(
+                content=content,
+                provider=config.provider,
+                model_name=config.model_name,
+                fallback_reason=fallback_reason,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            continue
+
     return GeneratedFileContent(
-        content=_strip_markdown_fence(_content_to_text(response.content)),
-        provider=config.provider,
-        model_name=config.model_name,
+        content=_render_stub_file_content(assignment.target_file, task_description=state.get("task_description", "")),
+        provider=primary_config.provider,
+        model_name=primary_config.model_name,
+        used_stub=True,
+        fallback_reason=f"all providers failed: {last_error}",
     )
