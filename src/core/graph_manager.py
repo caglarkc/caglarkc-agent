@@ -89,6 +89,17 @@ class GraphManager:
             ).model_dump(),
         )
 
+    async def _state_for_thread(self, thread_id: str | None) -> dict[str, Any]:
+        if not thread_id:
+            return {}
+        snapshot = await self.state_manager.snapshot()
+        for state in snapshot.values():
+            if not isinstance(state, dict):
+                continue
+            if state.get("planning_thread_id") == thread_id or state.get("current_thread_id") == thread_id:
+                return state
+        return {}
+
     async def handle_task_received(self, raw_event: dict[str, Any]) -> None:
         """Runs planner for a new user task (CLI/Telegram) and persists graph state."""
         try:
@@ -129,6 +140,14 @@ class GraphManager:
             )
             return
 
+        thread_state = await self._state_for_thread(envelope.thread_id)
+        if (
+            thread_state
+            and thread_state.get("planning_status") not in TERMINAL_TASK_STATUSES
+            and (thread_state.get("planning_thread_id") == envelope.thread_id or thread_state.get("current_thread_id") == envelope.thread_id)
+        ):
+            project_id = thread_state.get("project_id") or project_id
+
         await self.repository.initialize()
         project = await self.repository.get_project(project_id)
         if project is None:
@@ -155,9 +174,17 @@ class GraphManager:
             )
             return
 
-        existing_state = await self.state_manager.get(project_id, {})
+        existing_state = thread_state if thread_state.get("project_id") == project_id else await self.state_manager.get(project_id, {})
         if not isinstance(existing_state, dict):
             existing_state = {}
+        if not existing_state and envelope.thread_id:
+            config = self._thread_configs.get(envelope.thread_id) or build_thread_config(envelope.thread_id)
+            snapshot = await self.graph.aget_state(config)
+            checkpoint_state = dict(snapshot.values) if snapshot is not None and snapshot.values else {}
+            if checkpoint_state.get("planning_status") not in TERMINAL_TASK_STATUSES:
+                existing_state = checkpoint_state
+                project_id = checkpoint_state.get("project_id") or project_id
+                project = await self.repository.get_project(project_id) or project
         existing_is_terminal = existing_state.get("planning_status") in TERMINAL_TASK_STATUSES
         if existing_is_terminal:
             thread_id = envelope.thread_id or f"thread-{uuid4().hex}"
