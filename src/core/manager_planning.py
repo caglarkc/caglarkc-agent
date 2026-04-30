@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -105,12 +106,34 @@ class ManagerPlanningService:
                 error_message="GEMINI_API_KEY is missing",
             )
 
-        raw_response = await self._invoke_model(
-            user_message=user_message,
-            conversation_history=parsed_history,
-            existing_draft=draft,
-            execution_intent=normalized_intent,
-        )
+        try:
+            raw_response = await asyncio.wait_for(
+                self._invoke_model(
+                    user_message=user_message,
+                    conversation_history=parsed_history,
+                    existing_draft=draft,
+                    execution_intent=normalized_intent,
+                ),
+                timeout=max(5.0, self._settings.http_timeout_seconds + 5.0),
+            )
+        except Exception as exc:  # noqa: BLE001
+            fallback = self._heuristic_plan(
+                user_message=user_message,
+                conversation_history=parsed_history,
+                existing_draft=draft,
+                execution_intent=normalized_intent,
+            )
+            return ManagerPlanningResult(
+                reply_text=(
+                    f"Gemini planlama yaniti alinamadi ({type(exc).__name__}). "
+                    f"Kontrollu fallback ile devam ediyorum: {fallback.reply_text}"
+                ),
+                draft_plan=fallback.draft_plan,
+                execution_intent=fallback.execution_intent,
+                needs_clarification=fallback.needs_clarification,
+                used_fallback=True,
+                error_message=f"gemini_invoke_failed:{type(exc).__name__}",
+            )
         parsed = await self._parse_with_repair(raw_response)
         if parsed is None:
             preview = (raw_response or "")[:200].replace("\n", " ")
