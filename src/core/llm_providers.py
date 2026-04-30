@@ -17,6 +17,7 @@ from src.core.contracts import DispatchAssignment
 
 
 CONTEXT_MAX_CHARS = 4_000
+RELATED_FILE_MAX_CHARS = 1_800
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,48 @@ def _compact_text(value: Any, *, max_chars: int = CONTEXT_MAX_CHARS) -> str:
     if len(text) <= max_chars:
         return text
     return f"{text[:max_chars]}... [truncated]"
+
+
+def _safe_read_project_file(project_name: str, relative_path: str, *, max_chars: int = RELATED_FILE_MAX_CHARS) -> str | None:
+    if ".." in Path(relative_path).parts:
+        return None
+    project_root = get_settings().projects_root / project_name
+    path = (project_root / relative_path).resolve()
+    try:
+        path.relative_to(project_root.resolve())
+    except ValueError:
+        return None
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        return _compact_text(path.read_text(encoding="utf-8", errors="replace"), max_chars=max_chars)
+    except OSError:
+        return None
+
+
+def _related_file_snapshots(state: dict, target_file: str) -> str:
+    files = sorted(state.get("file_registry", {}).keys())
+    if target_file not in files:
+        files.append(target_file)
+    relevant: list[str] = []
+    target_suffix = Path(target_file).suffix.lower()
+    frontend_suffixes = {".html", ".css", ".js"}
+    if target_suffix in frontend_suffixes:
+        relevant = [path for path in files if Path(path).suffix.lower() in frontend_suffixes]
+    else:
+        relevant = [target_file]
+        for issue in [*state.get("validation_issues", []), *state.get("runtime_errors", []), *state.get("revision_tasks", [])]:
+            issue_target = issue.get("target_file")
+            if isinstance(issue_target, str) and issue_target not in relevant and issue_target != "__project__":
+                relevant.append(issue_target)
+    chunks: list[str] = []
+    for relative_path in relevant[:6]:
+        content = _safe_read_project_file(str(state.get("project_name", "")), relative_path)
+        if content is None:
+            continue
+        marker = "TARGET" if relative_path == target_file else "RELATED"
+        chunks.append(f"--- {marker} FILE: {relative_path} ---\n{content}")
+    return "\n\n".join(chunks) if chunks else "None"
 
 
 def _worker_model_config(worker_id: str, settings: Settings) -> WorkerModelConfig:
@@ -158,6 +201,30 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
         output_rules.append("The output must be valid JSON.")
     if suffix == ".py":
         output_rules.append("The output must be valid Python syntax with only standard-library or local imports.")
+<<<<<<< Updated upstream
+=======
+    if suffix in {".html", ".css", ".js"}:
+        output_rules.extend(
+            [
+                "When repairing frontend files, align HTML, CSS, and JavaScript selectors exactly with the related snapshots.",
+                "If feedback says a selector/id/class is missing and this target is HTML, add the missing matching element.",
+                "If feedback says a selector/id/class is missing and this target is JavaScript, either use an existing selector from HTML or guard querySelector/getElementById results before addEventListener/classList access.",
+                "If feedback says a local CSS asset is missing, remove the url(...) dependency or replace it with a CSS-only gradient/color.",
+            ]
+        )
+    related_issues = [
+        issue
+        for issue in [*state.get("revision_tasks", []), *state.get("validation_issues", []), *state.get("runtime_errors", [])]
+        if issue.get("target_file") in {target_file, "__project__"}
+    ]
+    issue_lines = []
+    for issue in related_issues[-8:]:
+        issue_lines.append(
+            f"- {issue.get('code', 'issue')}: {issue.get('reason') or issue.get('message') or issue.get('error')}"
+        )
+    execution_context = state.get("execution_results", [])[-8:]
+    related_snapshots = _related_file_snapshots(state, target_file)
+>>>>>>> Stashed changes
 
     system_prompt = (
         "You are a careful code-generation worker inside an orchestrated software team. "
@@ -181,6 +248,18 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
             "Context summary:",
             _compact_text(state.get("context_summary"), max_chars=CONTEXT_MAX_CHARS),
             "",
+<<<<<<< Updated upstream
+=======
+            "Previous validation/runtime feedback for this target:",
+            "\n".join(issue_lines) if issue_lines else "None",
+            "",
+            "Recent executor output:",
+            _compact_text(json.dumps(execution_context, ensure_ascii=True), max_chars=2_000) if execution_context else "None",
+            "",
+            "Current related file snapshots:",
+            related_snapshots,
+            "",
+>>>>>>> Stashed changes
             "Generate only the raw file body now.",
         ]
     )
@@ -209,6 +288,27 @@ def _strip_markdown_fence(content: str) -> str:
     if len(lines) >= 2 and lines[-1].strip() == "```":
         return "\n".join(lines[1:-1]).rstrip() + "\n"
     return content.rstrip() + "\n"
+
+
+def _normalize_generated_artifact(content: str, target_file: str) -> str:
+    stripped = _strip_markdown_fence(content).strip()
+    if not stripped.startswith("{"):
+        return stripped.rstrip() + "\n"
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return stripped.rstrip() + "\n"
+    if isinstance(payload, dict):
+        files = payload.get("files")
+        if isinstance(files, list):
+            for item in files:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("path") == target_file and isinstance(item.get("content"), str):
+                    return item["content"].rstrip() + "\n"
+        if isinstance(payload.get("content"), str):
+            return payload["content"].rstrip() + "\n"
+    return stripped.rstrip() + "\n"
 
 
 async def _direct_chat_response(config: WorkerModelConfig, settings: Settings, system_prompt: str, user_prompt: str) -> str | None:
@@ -302,7 +402,10 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
 
     for config in chain:
         try:
-            content = await _try_provider(config, settings, system_prompt, user_prompt)
+            content = _normalize_generated_artifact(
+                await _try_provider(config, settings, system_prompt, user_prompt),
+                assignment.target_file,
+            )
             fallback_reason = f"fallback from {primary_config.provider}" if config.provider != primary_config.provider else None
             return GeneratedFileContent(
                 content=content,

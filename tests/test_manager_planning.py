@@ -5,7 +5,13 @@ from types import SimpleNamespace
 import pytest
 
 from src.config.settings import Settings
+<<<<<<< Updated upstream
 from src.core.manager_planning import ManagerPlanningService
+=======
+from src.core.contracts import PlanConversationTurn, PlanDraft, PlannedFile
+from src.core.manager_planning import ManagerPlanningService, _normalize_plan_for_request
+from src.core.llm_providers import _normalize_generated_artifact
+>>>>>>> Stashed changes
 
 
 class FakeModel:
@@ -248,3 +254,40 @@ async def test_manager_planning_normalizes_frontend_three_worker_plan() -> None:
     assert result.draft_plan is not None
     assert [item.path for item in result.draft_plan.files] == ["index.html", "styles.css", "script.js"]
     assert all(item.dependencies == [] for item in result.draft_plan.files)
+<<<<<<< Updated upstream
+=======
+
+
+def test_frontend_plan_normalization_removes_runtime_reference_cycles() -> None:
+    plan = PlanDraft(
+        summary="restaurant site",
+        sprint_type="feature",
+        files=[
+            PlannedFile(path="index.html", description="markup", dependencies=["style.css", "script.js"], task_type="markup"),
+            PlannedFile(path="style.css", description="style", dependencies=["index.html"], task_type="style"),
+            PlannedFile(path="script.js", description="script", dependencies=["index.html"], task_type="script"),
+        ],
+    )
+
+    normalized = _normalize_plan_for_request(
+        plan,
+        user_message="uc ai ile restoran web sitesi yap",
+        conversation_history=[PlanConversationTurn(role="user", content="index html style css script js olsun")],
+    )
+
+    assert normalized is not None
+    assert {item.path: item.dependencies for item in normalized.files} == {
+        "index.html": [],
+        "style.css": [],
+        "script.js": [],
+    }
+
+
+def test_worker_artifact_normalization_unwraps_files_payload() -> None:
+    content = (
+        '{"execution_intent":"apply","files":[{"path":"script.js",'
+        '"content":"document.addEventListener(\\\"DOMContentLoaded\\\", () => {});"}]}'
+    )
+
+    assert _normalize_generated_artifact(content, "script.js") == 'document.addEventListener("DOMContentLoaded", () => {});\n'
+>>>>>>> Stashed changes

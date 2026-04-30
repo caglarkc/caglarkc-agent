@@ -11,6 +11,32 @@ from src.storage.models import Decision
 from src.storage.repository import Repository
 
 
+<<<<<<< Updated upstream
+=======
+MAX_BLOCKING_REVIEW_CYCLES = 6
+
+
+def _targets_for_issue(issue: dict, queue: list[dict]) -> list[str]:
+    explicit = issue.get("target_file", "__project__")
+    available = [item["assignment"]["target_file"] for item in queue]
+    if explicit in available:
+        return [explicit]
+    message = str(issue.get("message", "")).lower()
+    targets: list[str] = []
+    for target in available:
+        name = target.lower()
+        suffix = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+        if name in message or suffix in message:
+            targets.append(target)
+    if targets:
+        return sorted(set(targets))
+    if explicit == "__project__":
+        frontend = [target for target in available if target.endswith((".html", ".css", ".js"))]
+        return frontend or available
+    return [explicit]
+
+
+>>>>>>> Stashed changes
 async def reviewer_node(state: dict) -> dict:
     repository = Repository()
     await repository.initialize()
@@ -63,11 +89,12 @@ async def reviewer_node(state: dict) -> dict:
         else:
             issue_targets = {issue["target_file"] for issue in validation_issues}
             for issue in validation_issues:
+                targets = _targets_for_issue(issue, queue)
                 for item in queue:
-                    if item["assignment"]["target_file"] == issue["target_file"]:
+                    if item["assignment"]["target_file"] in targets:
                         item["status"] = "planned"
                         item["validation_error"] = issue["message"]
-                        file_registry[issue["target_file"]] = "planned"
+                        file_registry[item["assignment"]["target_file"]] = "planned"
             for item in queue:
                 if item["assignment"]["target_file"] not in issue_targets and item.get("status") == "done":
                     continue
@@ -110,9 +137,47 @@ async def reviewer_node(state: dict) -> dict:
         decision_rationale = "There are still planned items waiting to run."
         await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="active", review_cycles=review_cycles)
     elif all(status == "done" for status in file_registry.values()):
+<<<<<<< Updated upstream
         await EventBus().emit(
             "sprint.completed",
             new_event(
+=======
+        final_review = await run_final_project_review(state)
+        final_review_issues = deepcopy(final_review.get("issues", []))
+        if final_review_issues:
+            for issue in final_review_issues:
+                affected_targets = _targets_for_issue(issue, queue)
+                for item in queue:
+                    if item["assignment"]["target_file"] in affected_targets:
+                        item["status"] = "planned"
+                        item["validation_error"] = issue["message"]
+                        file_registry[item["assignment"]["target_file"]] = "planned"
+            updates = {
+                "worker_queue": queue,
+                "file_registry": file_registry,
+                "sprint_status": "revision" if review_cycles < MAX_BLOCKING_REVIEW_CYCLES else "fail",
+                "review_cycles": review_cycles,
+                "messages": ["reviewer requested revision after final model review"],
+                "validation_issues": [],
+                "revision_tasks": [
+                    {"target_file": issue["target_file"], "reason": issue["message"], "code": issue["code"]}
+                    for issue in final_review_issues
+                ],
+                "final_review": final_review,
+                "reviewer_decision": "revision" if review_cycles < MAX_BLOCKING_REVIEW_CYCLES else "fail",
+            }
+            decision_summary = "Reviewer blocked approval after final model review."
+            decision_rationale = "; ".join(f"{issue['target_file']}:{issue['code']}" for issue in final_review_issues[:5])
+            await repository.update_sprint_status(
+                project_id,
+                state.get("current_sprint", 1),
+                status=updates["sprint_status"],
+                review_cycles=review_cycles,
+                revision_note="final model review issues present",
+            )
+        else:
+            await EventBus().emit(
+>>>>>>> Stashed changes
                 "sprint.completed",
                 payload={"result": "approved", "files": list(file_registry.keys())},
                 project_id=project_id,
