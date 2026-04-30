@@ -63,6 +63,7 @@ HELP_TEXT = "\n".join(
         "/reject [approval_id] [reason]",
         "/cancel [approval_id] [reason]",
         "/close [reason]",
+        "/recover [project_id veya proje adi]",
         "/projects",
         "/history <proje>",
         "/project use <id veya proje adi>",
@@ -175,6 +176,8 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
             return CommandOutcome(ok=False, message=f"AI Provider Durumu alinamadi: {exc}", level="error")
     if command.name == "close":
         return await _close_current_task(command, context, status="closed")
+    if command.name == "recover":
+        return await _handle_recover_command(command, context)
     if command.name == "projects":
         return await _handle_projects_command()
     if command.name == "history":
@@ -193,6 +196,29 @@ async def _handle_projects_command() -> CommandOutcome:
     return CommandOutcome(
         ok=True,
         message=format_projects_listing(projects, active_project_id=active.project_id if active else None),
+    )
+
+
+async def _handle_recover_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    project_ref = " ".join(command.args).strip() or None
+    if context.graph_manager is None:
+        return CommandOutcome(ok=False, message="Recover icin graph manager hazir degil.", level="error")
+    result = await context.graph_manager.recover_project_execution(project_ref)
+    if not result.get("ok"):
+        reason = result.get("reason", "unknown")
+        if reason == "awaiting_approval":
+            return CommandOutcome(ok=False, message="Proje approval bekliyor. Once /start veya /approve kullan.", level="warning")
+        return CommandOutcome(ok=False, message=f"Recover basarisiz: {reason}", level="warning")
+    project_id = result["project_id"]
+    if hasattr(context.state_manager, "get"):
+        state = await context.state_manager.get(project_id, {})
+        if isinstance(state, dict):
+            context.current_state = state
+            context.active_approval = state.get("approval_request") if state.get("awaiting_approval") else None
+    action_text = ", ".join(result.get("actions", [])) or "state checked"
+    return CommandOutcome(
+        ok=True,
+        message=f"Recovered [{result['thread_id']}]: {result['project_id']} | {result['project_name']} | next={result['next_node']} | {action_text}",
     )
 
 

@@ -18,6 +18,7 @@ from src.core.approval_guard import ApprovalConsumeResult, ApprovalGuard
 from src.core.contracts import ApprovalDecision, ApprovalRequest, event_validation_error, new_event, validate_event
 from src.core.event_bus import EventBus
 from src.core.project_manager import ProjectManager
+from src.core.recovery import analyze_execution_recovery
 from src.core.scheduler import FairScheduler, ScheduledTask
 from src.core.state_manager import StateManager
 from src.core.state_transaction import StateTransaction
@@ -406,6 +407,57 @@ class GraphManager:
         if cleaned:
             await self.state_manager.flush_to_disk()
         return cleaned
+
+    async def recover_project_execution(self, project_ref: str | None = None) -> dict[str, Any]:
+        if self.graph is None:
+            return {"ok": False, "reason": "graph_not_ready"}
+        await self.repository.initialize()
+        project = await self.project_manager.get_project(project_ref) if project_ref else await self.project_manager.active_project()
+        if project is None:
+            return {"ok": False, "reason": "project_not_found", "project_ref": project_ref}
+        state = await self.state_manager.get(project.project_id, {})
+        if not isinstance(state, dict) or not state:
+            await self.state_manager.load_from_disk()
+            state = await self.state_manager.get(project.project_id, {})
+        if not isinstance(state, dict) or not state:
+            return {"ok": False, "reason": "state_not_found", "project_id": project.project_id}
+        if state.get("awaiting_approval"):
+            return {"ok": False, "reason": "awaiting_approval", "project_id": project.project_id}
+        thread_id = state.get("planning_thread_id") or state.get("current_thread_id")
+        if not thread_id:
+            return {"ok": False, "reason": "thread_not_found", "project_id": project.project_id}
+        config = self._thread_configs.get(thread_id) or build_thread_config(thread_id)
+        self.register_project_thread(project.project_id, thread_id, config)
+        project_root = get_settings().projects_root / project.name
+        updates, next_node, actions = await analyze_execution_recovery(state, project_root)
+        for record in await self.repository.list_file_records(project.project_id):
+            if record.status in {"reserved", "in_progress"} or updates["file_registry"].get(record.path) == "planned":
+                await self.repository.upsert_file_record(
+                    record.model_copy(
+                        update={
+                            "status": updates["file_registry"].get(record.path, "planned"),
+                            "worker_id": None if updates["file_registry"].get(record.path) == "planned" else record.worker_id,
+                            "reservation_owner": None,
+                            "updated_at": utc_now(),
+                        }
+                    )
+                )
+        merged = {**state, **updates}
+        await self.graph.aupdate_state(config, merged, as_node="reviewer")
+        await self.graph.ainvoke(Command(goto=next_node), config=config)
+        refreshed = await self.graph.aget_state(config)
+        await self.state_manager.set(project.project_id, refreshed.values)
+        await self.state_manager.flush_to_disk()
+        await self._emit_snapshot_sync(project.project_id, thread_id, phase="recovered_execution")
+        return {
+            "ok": True,
+            "project_id": project.project_id,
+            "project_name": project.name,
+            "thread_id": thread_id,
+            "next_node": next_node,
+            "actions": actions,
+            "sprint_status": refreshed.values.get("sprint_status"),
+        }
 
     async def schedule_project_thread(self, *, project_id: str, thread_id: str, task_id: str, payload: dict[str, Any] | None = None) -> None:
         self.register_project_thread(project_id, thread_id)
