@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     openrouter_api_key_primary: str = Field(default="", alias="OPENROUTER_API_KEY_PRIMARY")
     openrouter_api_key_secondary: str = Field(default="", alias="OPENROUTER_API_KEY_SECONDARY")
     worker_use_stub: bool = Field(default=False, alias="WORKER_USE_STUB")
+    final_review_enabled: bool = Field(default=True, alias="FINAL_REVIEW_ENABLED")
+    final_review_timeout_seconds: float = Field(default=45.0, alias="FINAL_REVIEW_TIMEOUT_SECONDS")
     telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(default="", alias="TELEGRAM_CHAT_ID")
 
