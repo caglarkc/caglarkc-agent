@@ -123,12 +123,17 @@ class ManagerPlanningService:
                 existing_draft=draft,
                 execution_intent=normalized_intent,
             )
+            fallback_plan = _normalize_plan_for_request(
+                fallback.draft_plan,
+                user_message=user_message,
+                conversation_history=parsed_history,
+            )
             return ManagerPlanningResult(
                 reply_text=(
                     f"Gemini planlama yaniti alinamadi ({type(exc).__name__}). "
                     f"Kontrollu fallback ile devam ediyorum: {fallback.reply_text}"
                 ),
-                draft_plan=fallback.draft_plan,
+                draft_plan=fallback_plan,
                 execution_intent=fallback.execution_intent,
                 needs_clarification=fallback.needs_clarification,
                 used_fallback=True,
