@@ -5,14 +5,13 @@ from uuid import uuid4
 
 from src.core.contracts import new_event
 from src.core.event_bus import EventBus
+from src.core.final_review import run_final_project_review
 from src.core.project_manager import ProjectManager
 from src.core.state_transaction import StateTransaction
 from src.storage.models import Decision
 from src.storage.repository import Repository
 
 
-<<<<<<< Updated upstream
-=======
 MAX_BLOCKING_REVIEW_CYCLES = 6
 
 
@@ -36,7 +35,6 @@ def _targets_for_issue(issue: dict, queue: list[dict]) -> list[str]:
     return [explicit]
 
 
->>>>>>> Stashed changes
 async def reviewer_node(state: dict) -> dict:
     repository = Repository()
     await repository.initialize()
