@@ -61,7 +61,13 @@ CLI icinde provider durumunu kontrol et:
 /scan
 ```
 
-Beklenen: `gemini ... available=True` veya Gemini icin api key set/available bilgisi.
+Beklenen: Her provider icin gercek ping sonucu, latency, output token sayisi, yaklasik token/s ve kisa response preview.
+
+Ornek:
+
+```text
+✓ gemini  gemini-2.5-flash  response_ok:pong  latency=1044ms | out_tokens=1 | tok/s=0.96  response='pong'
+```
 
 Projeleri gor:
 
