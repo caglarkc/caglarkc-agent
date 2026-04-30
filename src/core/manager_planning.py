@@ -157,9 +157,14 @@ class ManagerPlanningService:
             explicit=normalized_intent.explicit,
             reason=normalized_intent.reason or parsed.execution_intent,
         )
+        final_plan = _normalize_plan_for_request(
+            parsed.plan or draft,
+            user_message=user_message,
+            conversation_history=parsed_history,
+        )
         return ManagerPlanningResult(
             reply_text=parsed.reply_text.strip(),
-            draft_plan=parsed.plan or draft,
+            draft_plan=final_plan,
             execution_intent=final_intent,
             needs_clarification=parsed.needs_clarification,
         )
@@ -409,6 +414,45 @@ def _heuristic_draft_from_message(user_message: str, *, existing_draft: PlanDraf
         ]
         return PlanDraft(summary=text, sprint_type="feature", files=files)
     return existing_draft
+
+
+def _normalize_plan_for_request(
+    plan: PlanDraft | None,
+    *,
+    user_message: str,
+    conversation_history: list[PlanConversationTurn],
+) -> PlanDraft | None:
+    if plan is None:
+        return None
+    combined = " ".join([turn.content for turn in conversation_history if turn.role == "user"] + [user_message]).lower()
+    wants_frontend = any(keyword in combined for keyword in ("restoran", "restaurant", "site", "web", "landing"))
+    wants_three_workers = any(keyword in combined for keyword in ("3 ai", "üç ai", "uc ai", "3 ayrı", "üç ayrı", "uc ayri", "three"))
+    if not wants_frontend or not wants_three_workers or len(plan.files) >= 3:
+        return plan
+    return PlanDraft(
+        summary=plan.summary,
+        sprint_type=plan.sprint_type or "feature",
+        files=[
+            PlannedFile(
+                path="index.html",
+                description="Build the restaurant landing page markup with brand, story, menu highlights, and reservation call to action.",
+                dependencies=[],
+                task_type="frontend_markup",
+            ),
+            PlannedFile(
+                path="styles.css",
+                description="Create the responsive warm-professional visual design for the restaurant site.",
+                dependencies=[],
+                task_type="frontend_style",
+            ),
+            PlannedFile(
+                path="script.js",
+                description="Add lightweight menu and reservation interactions without external dependencies.",
+                dependencies=[],
+                task_type="frontend_script",
+            ),
+        ],
+    )
 
 
 def _extract_json_object(value: str) -> str | None:
