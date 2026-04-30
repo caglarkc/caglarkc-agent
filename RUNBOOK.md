@@ -157,6 +157,26 @@ Iptal et:
 /cancel <approval_id> <neden>
 ```
 
+Aktif planning task'ini approval olmadan kapat:
+
+```text
+/close <neden>
+```
+
+Approval yokken aktif planning task'ini reddet:
+
+```text
+/reject <neden>
+```
+
+Approval yokken aktif planning task'ini iptal et:
+
+```text
+/cancel <neden>
+```
+
+Bu komutlardan sonra sonraki `/task ...` yeni `thread-...` ile baslar.
+
 ## CLI Komutlari
 
 ```text
@@ -166,6 +186,7 @@ Iptal et:
 /approve [approval_id]
 /reject [approval_id] [reason]
 /cancel [approval_id] [reason]
+/close [reason]
 /projects
 /history <proje>
 /project use <id>
