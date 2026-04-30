@@ -342,7 +342,10 @@ async def _handle_start_command(command: ParsedCommand, context: CommandContext)
     try:
         project, state = await _select_project_state(context, project_ref)
     except LookupError:
-        return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+        if project_ref or not context.current_state:
+            return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+        project = None
+        state = context.current_state
     approval = state.get("approval_request")
     if not state.get("awaiting_approval") or not isinstance(approval, dict):
         return CommandOutcome(
@@ -356,7 +359,8 @@ async def _handle_start_command(command: ParsedCommand, context: CommandContext)
     event = ParsedCommand(name="approve", args=[approval_id], raw=f"/approve {approval_id}")
     outcome = await _handle_approval_command(event, context)
     if outcome.ok:
-        return CommandOutcome(ok=True, message=f"Started plan [{state.get('current_thread_id')}]: {project.project_id} | {project.name}")
+        project_label = f"{project.project_id} | {project.name}" if project is not None else state.get("project_id", "active project")
+        return CommandOutcome(ok=True, message=f"Started plan [{state.get('current_thread_id')}]: {project_label}")
     return outcome
 
 
