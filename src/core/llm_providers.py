@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 from langchain_community.chat_models import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -210,6 +211,52 @@ def _strip_markdown_fence(content: str) -> str:
     return content.rstrip() + "\n"
 
 
+async def _direct_chat_response(config: WorkerModelConfig, settings: Settings, system_prompt: str, user_prompt: str) -> str | None:
+    if config.provider == "ollama":
+        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+            response = await client.post(
+                f"{settings.ollama_base_url.rstrip('/')}/api/chat",
+                json={
+                    "model": config.model_name,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0},
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        return (payload.get("message") or {}).get("content")
+    if config.provider in {"openrouter_primary", "openrouter_secondary"}:
+        api_key = settings.openrouter_api_key_primary if config.provider == "openrouter_primary" else settings.openrouter_api_key_secondary
+        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
+            response = await client.post(
+                f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "HTTP-Referer": "https://local.phase1.worker",
+                    "X-Title": "AI Development Team Orchestrator Worker",
+                },
+                json={
+                    "model": config.model_name,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        choices = payload.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            return ""
+        return ((choices[0].get("message") or {}).get("content") or "")
+    return None
+
+
 async def generate_file_content(state: dict, assignment: DispatchAssignment) -> GeneratedFileContent:
     settings = get_settings()
     config = _worker_model_config(assignment.worker_id, settings)
@@ -231,6 +278,13 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
         )
 
     system_prompt, user_prompt = build_worker_prompt(state, assignment)
+    direct_content = await _direct_chat_response(config, settings, system_prompt, user_prompt)
+    if direct_content is not None:
+        return GeneratedFileContent(
+            content=_strip_markdown_fence(_content_to_text(direct_content)),
+            provider=config.provider,
+            model_name=config.model_name,
+        )
     model = _chat_model_for(config, settings)
     response = await asyncio.wait_for(
         model.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
