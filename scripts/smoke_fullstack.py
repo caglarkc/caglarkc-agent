@@ -59,6 +59,8 @@ def configure_test_environment() -> None:
     os.environ["SQLITE_DB_PATH"] = str(base / "orchestrator.db")
     os.environ["GRAPH_CHECKPOINT_PATH"] = str(base / "checkpoints.sqlite")
     os.environ["TELEGRAM_CHAT_ID"] = "1001"
+    os.environ["MANAGER_USE_GEMINI"] = "0"
+    os.environ["WORKER_USE_STUB"] = "1"
     get_settings.cache_clear()
 
 
@@ -83,28 +85,30 @@ async def check_fullstack_flow() -> CheckResult:
     await graph_manager.start()
     await graph_manager.bootstrap_runtime()
 
-    project = Project(project_id="fs-project", name="fullstack-alpha", description="Fullstack smoke", status="active")
-    await repository.upsert_project(project.model_copy(update={"metadata": {"selected": True}}))
-
     command_context = CommandContext(
         event_bus=bus,
         graph_manager=graph_manager,
         notifier=CLINotifier(),
         state_manager=state_manager,
-        current_state={"project_id": project.project_id, "project_name": project.name},
+        current_state=None,
         active_approval=None,
     )
-    task_outcome = await execute_command("/task build a smoke project", command_context)
-    state = await state_manager.get(project.project_id)
+    new_outcome = await execute_command("/new fullstack-alpha", command_context)
+    chat_outcome = await execute_command("/r build a smoke web project", command_context)
+    project_id = command_context.current_state["project_id"]
+    state = await state_manager.get(project_id)
+    command_context.current_state = state
+    plan_outcome = await execute_command("/plan fullstack-alpha", command_context)
+    state = await state_manager.get(project_id)
     approval_id = state["approval_request"]["approval_id"]
     command_context.current_state = state
     command_context.active_approval = state["approval_request"]
     approve_outcome = await execute_command(f"/approve {approval_id}", command_context)
     await asyncio.sleep(0.1)
-    final_state = await state_manager.get(project.project_id)
+    final_state = await state_manager.get(project_id)
     await graph_manager.shutdown_runtime()
-    if task_outcome.ok and approve_outcome.ok and final_state.get("sprint_status") == "approved":
-        return CheckResult("Fullstack Flow", True, "Task -> approval -> worker -> reviewer -> completed akisi bitti.")
+    if all(item.ok for item in (new_outcome, chat_outcome, plan_outcome, approve_outcome)) and final_state.get("sprint_status") == "approved":
+        return CheckResult("Fullstack Flow", True, "New -> chat -> plan -> approval -> worker -> reviewer -> completed akisi bitti.")
     return CheckResult("Fullstack Flow", False, f"Akis tamamlanmadi: state={final_state}")
 
 
