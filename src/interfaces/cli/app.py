@@ -24,6 +24,7 @@ EVENT_NAMES = [
     "sprint.revision_needed",
     "sprint.completed",
     "snapshot.synced",
+    "task.closed",
     "system.heartbeat",
     "system.stalled",
     "error.occurred",
@@ -170,6 +171,12 @@ class OrchestratorCLIApp(App[None]):
             self.active_approval = None
             self.current_state["approval_request"] = None
             self.current_state["awaiting_approval"] = False
+        elif event_type == "task.closed":
+            self.current_state["planning_status"] = body.get("status", "closed")
+            self.current_state["sprint_status"] = body.get("status", "closed")
+            self.current_state["approval_request"] = None
+            self.current_state["awaiting_approval"] = False
+            self.active_approval = None
         elif event_type == "system.heartbeat":
             self.current_state["last_heartbeat_at"] = payload.get("timestamp")
         elif event_type == "system.stalled":
