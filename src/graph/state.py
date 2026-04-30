@@ -49,6 +49,10 @@ class OrchestratorState(TypedDict, total=False):
     active_assignments: dict[str, dict[str, Any]]
     approval_request: dict[str, Any] | None
     validation_issues: list[dict[str, Any]]
+    execution_results: list[dict[str, Any]]
+    runtime_errors: list[dict[str, Any]]
+    last_execution_status: str
+    final_review: dict[str, Any] | None
     revision_tasks: list[dict[str, Any]]
     current_thread_id: Annotated[str, lambda a, b: b]
     contract_completed: bool
@@ -101,6 +105,10 @@ def build_initial_state(
         "active_assignments": {},
         "approval_request": None,
         "validation_issues": [],
+        "execution_results": [],
+        "runtime_errors": [],
+        "last_execution_status": "not_run",
+        "final_review": None,
         "revision_tasks": [],
         "current_thread_id": current_thread_id,
         "contract_completed": False,
