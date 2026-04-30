@@ -63,11 +63,11 @@ async def test_planner_node_builds_queue_when_execution_is_requested(
     assert result["awaiting_approval"] is True
     assert result["approval_request"]["metadata"]["source"] == "gemini_manager"
     assert [item["assignment"]["target_file"] for item in result["worker_queue"]] == [
-        "app.py",
-        "templates/index.html",
-        "static/styles.css",
+        "index.html",
+        "styles.css",
+        "script.js",
     ]
-    assert result["dependencies"]["templates/index.html"] == ["app.py"]
+    assert result["dependencies"]["styles.css"] == []
 
 
 @pytest.mark.asyncio
