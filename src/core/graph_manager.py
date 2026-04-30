@@ -200,6 +200,7 @@ class GraphManager:
         try:
             if existing_state and not existing_is_terminal and self.project_id_for_thread(thread_id) == project_id:
                 state_update = {
+                    **existing_state,
                     "project_id": project_id,
                     "project_name": project.name,
                     "task_description": task_description or existing_state.get("task_description", ""),

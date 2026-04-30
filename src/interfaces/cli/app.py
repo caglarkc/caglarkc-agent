@@ -7,6 +7,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import Footer, Header, Input
 
 from src.core.event_bus import EventBus
+from src.core.project_manager import ProjectManager
 from src.core.state_manager import StateManager
 from src.interfaces.cli.commands import CommandContext, execute_command
 from src.interfaces.cli.notifier import CLINotifier
@@ -99,16 +100,24 @@ class OrchestratorCLIApp(App[None]):
 
     async def _hydrate_from_state_manager(self) -> None:
         snapshot = await self.state_manager.snapshot()
-        if snapshot:
-            _, state = next(reversed(snapshot.items()))
-            if isinstance(state, dict):
-                self.current_state = state
-                awaiting = state.get("awaiting_approval")
-                ar = state.get("approval_request")
-                if awaiting and isinstance(ar, dict):
-                    self.active_approval = ar
-                else:
-                    self.active_approval = None
+        state = None
+        active_project = await ProjectManager().active_project()
+        if active_project is not None:
+            active_state = await self.state_manager.get(active_project.project_id, {})
+            if isinstance(active_state, dict) and active_state:
+                state = active_state
+        if state is None and snapshot:
+            candidates = [item for item in snapshot.values() if isinstance(item, dict)]
+            live = [item for item in candidates if item.get("planning_status") not in {"closed", "rejected", "cancelled"}]
+            state = (live or candidates)[-1] if (live or candidates) else None
+        if isinstance(state, dict):
+            self.current_state = state
+            awaiting = state.get("awaiting_approval")
+            ar = state.get("approval_request")
+            if awaiting and isinstance(ar, dict):
+                self.active_approval = ar
+            else:
+                self.active_approval = None
 
     async def _subscribe_events(self) -> None:
         for event_name in EVENT_NAMES:
