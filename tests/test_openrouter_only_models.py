@@ -10,11 +10,11 @@ from src.core.llm_providers import _fallback_chain, _worker_model_config
 def test_worker_model_config_uses_openrouter_pair_when_local_is_disabled() -> None:
     settings = Settings(
         _env_file=None,
-        ollama_model="",
-        openrouter_api_key_primary="primary-key",
-        openrouter_api_key_secondary="secondary-key",
-        openrouter_model="primary-model",
-        openrouter_model_secondary="secondary-model",
+        OLLAMA_MODEL="",
+        OPENROUTER_API_KEY_PRIMARY="primary-key",
+        OPENROUTER_API_KEY_SECONDARY="secondary-key",
+        OPENROUTER_MODEL="primary-model",
+        OPENROUTER_MODEL_SECONDARY="secondary-model",
     )
 
     assert _worker_model_config("worker_a", settings).provider == "openrouter_primary"
@@ -27,12 +27,12 @@ def test_worker_model_config_uses_openrouter_pair_when_local_is_disabled() -> No
 def test_fallback_chain_skips_ollama_even_if_model_is_configured() -> None:
     settings = Settings(
         _env_file=None,
-        ollama_model="qwen2.5-coder:7b",
-        openrouter_api_key_primary="primary-key",
-        openrouter_api_key_secondary="secondary-key",
-        openrouter_model="primary-model",
-        openrouter_model_secondary="secondary-model",
-        gemini_api_key="gemini-key",
+        OLLAMA_MODEL="qwen2.5-coder:7b",
+        OPENROUTER_API_KEY_PRIMARY="primary-key",
+        OPENROUTER_API_KEY_SECONDARY="secondary-key",
+        OPENROUTER_MODEL="primary-model",
+        OPENROUTER_MODEL_SECONDARY="secondary-model",
+        GEMINI_API_KEY="gemini-key",
     )
 
     assert [config.provider for config in _fallback_chain(settings)] == [
@@ -49,13 +49,13 @@ async def test_final_review_runs_primary_then_secondary_openrouter(monkeypatch, 
     (project_root / "index.html").write_text("<h1>Hello</h1>\n", encoding="utf-8")
     settings = Settings(
         _env_file=None,
-        projects_root=tmp_path,
-        worker_use_stub=False,
-        final_review_enabled=True,
-        openrouter_api_key_primary="primary-key",
-        openrouter_api_key_secondary="secondary-key",
-        openrouter_model="primary-model",
-        openrouter_model_secondary="secondary-model",
+        PROJECTS_ROOT=tmp_path,
+        WORKER_USE_STUB=False,
+        FINAL_REVIEW_ENABLED=True,
+        OPENROUTER_API_KEY_PRIMARY="primary-key",
+        OPENROUTER_API_KEY_SECONDARY="secondary-key",
+        OPENROUTER_MODEL="primary-model",
+        OPENROUTER_MODEL_SECONDARY="secondary-model",
     )
     calls: list[tuple[str, str, str]] = []
 
