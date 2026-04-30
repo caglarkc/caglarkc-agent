@@ -89,7 +89,15 @@ async def validator_node(state: dict) -> dict:
     settings = get_settings()
     project_root = settings.projects_root / state["project_name"]
     outputs = sorted({item for values in state.get("worker_outputs", {}).values() for item in values})
-    validation_issues: list[dict[str, str]] = []
+    validation_issues: list[dict[str, str]] = [
+        {
+            "code": issue.get("code", "runtime_error"),
+            "severity": issue.get("severity", "error"),
+            "target_file": issue.get("target_file", "__project__"),
+            "message": issue.get("message", "runtime execution failed"),
+        }
+        for issue in state.get("runtime_errors", [])
+    ]
 
     for relative_path in outputs:
         if ".." in Path(relative_path).parts:
