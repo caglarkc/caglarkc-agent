@@ -157,7 +157,16 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
             lines = ["AI Provider Durumu:"]
             for result in results:
                 status = "✓" if result.available else "✗"
-                lines.append(f"{status} {result.provider}  {result.model_name}  {result.detail}")
+                metrics = []
+                if result.latency_ms is not None:
+                    metrics.append(f"latency={result.latency_ms}ms")
+                if result.output_tokens is not None:
+                    metrics.append(f"out_tokens={result.output_tokens}")
+                if result.tokens_per_second is not None:
+                    metrics.append(f"tok/s={result.tokens_per_second}")
+                metric_text = f"  {' | '.join(metrics)}" if metrics else ""
+                preview = f"  response={result.response_preview!r}" if result.response_preview else ""
+                lines.append(f"{status} {result.provider}  {result.model_name}  {result.detail}{metric_text}{preview}")
             return CommandOutcome(ok=True, message="\n".join(lines))
         except Exception as exc:
             return CommandOutcome(ok=False, message=f"AI Provider Durumu alinamadi: {exc}", level="error")
