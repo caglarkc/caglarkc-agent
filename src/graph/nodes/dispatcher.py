@@ -60,9 +60,13 @@ def _worker_loads(queue: list[dict], worker_status: dict[str, str]) -> dict[str,
     for item in queue:
         assignment = item.get("assignment", {})
         worker_id = assignment.get("worker_id")
-        if worker_id in loads and item.get("status") in {"assigned", "in_progress", "done", "failed", "planned"}:
+        if worker_id in loads and item.get("status") in {"assigned", "in_progress", "done"}:
             loads[worker_id] += 1
     return loads
+
+
+def _worker_failure_counts(worker_failure_log: dict[str, list[dict]], worker_status: dict[str, str]) -> dict[str, int]:
+    return {worker_id: len(worker_failure_log.get(worker_id, [])) for worker_id in worker_status}
 
 
 def _select_idle_worker(
@@ -70,15 +74,18 @@ def _select_idle_worker(
     queue_item: dict,
     queue: list[dict],
     worker_status: dict[str, str],
+    worker_failure_log: dict[str, list[dict]],
 ) -> str | None:
     preferred = queue_item.get("assignment", {}).get("worker_id")
-    if preferred in worker_status and worker_status.get(preferred) == "idle":
+    failures = _worker_failure_counts(worker_failure_log, worker_status)
+    min_failure_count = min((failures[worker_id] for worker_id, status in worker_status.items() if status == "idle"), default=0)
+    if preferred in worker_status and worker_status.get(preferred) == "idle" and failures.get(preferred, 0) <= min_failure_count:
         return preferred
     idle_workers = [worker_id for worker_id, status in worker_status.items() if status == "idle"]
     if not idle_workers:
         return None
     loads = _worker_loads(queue, worker_status)
-    return sorted(idle_workers, key=lambda worker_id: (loads.get(worker_id, 0), worker_id))[0]
+    return sorted(idle_workers, key=lambda worker_id: (failures.get(worker_id, 0), loads.get(worker_id, 0), worker_id))[0]
 
 
 async def dispatcher_node(state: dict) -> dict:
@@ -88,6 +95,7 @@ async def dispatcher_node(state: dict) -> dict:
     dependencies = deepcopy(state.get("dependencies", {}))
     file_registry = deepcopy(state.get("file_registry", {}))
     worker_status = deepcopy(state.get("worker_status", {}))
+    worker_failure_log = deepcopy(state.get("worker_failure_log", {}))
     reservation_conflicts = deepcopy(state.get("reservation_conflicts", []))
     last_heartbeat_at = state.get("last_heartbeat_at")
     project_id = state["project_id"]
@@ -176,7 +184,12 @@ async def dispatcher_node(state: dict) -> dict:
     for index, item in enumerate(queue):
         if item.get("status") != "planned":
             continue
-        candidate_worker = _select_idle_worker(queue_item=item, queue=queue, worker_status=worker_status)
+        candidate_worker = _select_idle_worker(
+            queue_item=item,
+            queue=queue,
+            worker_status=worker_status,
+            worker_failure_log=worker_failure_log,
+        )
         if candidate_worker is None:
             break
         assignment = DispatchAssignment.model_validate(item["assignment"]).model_copy(update={"worker_id": candidate_worker})
