@@ -139,13 +139,20 @@ async def worker_node(state: dict) -> dict:
             if item["assignment"]["task_id"] == assignment.task_id:
                 if classification.retryable and retry_count < RetryPolicy().max_retry:
                     item["status"] = "planned"
-                    next_worker = next(
-                        (
-                            candidate
-                            for candidate, status in worker_status.items()
-                            if candidate not in {worker_id} and status == "idle"
-                        ),
-                        worker_id,
+                    failure_counts = {candidate: len(worker_failure_log.get(candidate, [])) for candidate in worker_status}
+                    output_counts = {candidate: len(worker_outputs.get(candidate, [])) for candidate in worker_status}
+                    candidates = [
+                        candidate
+                        for candidate, status in worker_status.items()
+                        if candidate not in {worker_id} and status == "idle"
+                    ]
+                    next_worker = (
+                        sorted(
+                            candidates,
+                            key=lambda candidate: (failure_counts.get(candidate, 0), output_counts.get(candidate, 0), candidate),
+                        )[0]
+                        if candidates
+                        else worker_id
                     )
                     item["assignment"]["worker_id"] = next_worker
                 else:
