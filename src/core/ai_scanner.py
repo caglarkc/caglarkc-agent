@@ -62,6 +62,13 @@ class AIScanner:
         settings = get_settings()
         model_name = settings.ollama_model
         base_url = settings.ollama_base_url.rstrip("/")
+        if not model_name:
+            return ProviderResult(
+                provider="ollama",
+                available=False,
+                model_name="",
+                detail="disabled:OLLAMA_MODEL empty",
+            )
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(f"{base_url}/api/tags")
