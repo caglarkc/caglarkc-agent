@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from copy import deepcopy
@@ -443,8 +444,25 @@ class GraphManager:
                     )
                 )
         merged = {**state, **updates}
+        await self.state_manager.set(project.project_id, merged)
+        await self.state_manager.flush_to_disk()
         await self.graph.aupdate_state(config, merged, as_node="reviewer")
-        await self.graph.ainvoke(Command(goto=next_node), config=config)
+        try:
+            await asyncio.wait_for(
+                self.graph.ainvoke(Command(goto=next_node), config=config),
+                timeout=max(120.0, get_settings().http_timeout_seconds * 8),
+            )
+        except asyncio.TimeoutError:
+            await self._emit_snapshot_sync(project.project_id, thread_id, phase="recovery_prepared_timeout")
+            return {
+                "ok": True,
+                "project_id": project.project_id,
+                "project_name": project.name,
+                "thread_id": thread_id,
+                "next_node": next_node,
+                "actions": [*actions, "graph continuation timed out; recovery state persisted"],
+                "sprint_status": updates.get("sprint_status"),
+            }
         refreshed = await self.graph.aget_state(config)
         await self.state_manager.set(project.project_id, refreshed.values)
         await self.state_manager.flush_to_disk()
