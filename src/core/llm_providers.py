@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -231,7 +232,10 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
 
     system_prompt, user_prompt = build_worker_prompt(state, assignment)
     model = _chat_model_for(config, settings)
-    response = await model.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
+    response = await asyncio.wait_for(
+        model.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]),
+        timeout=max(5.0, settings.http_timeout_seconds + 5.0),
+    )
     return GeneratedFileContent(
         content=_strip_markdown_fence(_content_to_text(response.content)),
         provider=config.provider,
