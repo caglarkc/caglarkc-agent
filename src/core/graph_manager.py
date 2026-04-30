@@ -159,22 +159,15 @@ class GraphManager:
         if not isinstance(existing_state, dict):
             existing_state = {}
         existing_is_terminal = existing_state.get("planning_status") in TERMINAL_TASK_STATUSES
-        thread_id = (
-            None
-            if existing_is_terminal
-            else existing_state.get("planning_thread_id")
-        ) or (
-            existing_state.get("planning_thread_id")
-            if not existing_is_terminal
-            else None
-        ) or (
-            existing_state.get("current_thread_id")
-            if not existing_is_terminal
-            else None
-        ) or (
-            or envelope.thread_id
-            or f"thread-{uuid4().hex}"
-        )
+        if existing_is_terminal:
+            thread_id = envelope.thread_id or f"thread-{uuid4().hex}"
+        else:
+            thread_id = (
+                existing_state.get("planning_thread_id")
+                or existing_state.get("current_thread_id")
+                or envelope.thread_id
+                or f"thread-{uuid4().hex}"
+            )
         config = self._thread_configs.get(thread_id) or build_thread_config(thread_id)
         self.register_project_thread(project_id, thread_id, config)
         try:
