@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 from src.config.settings import get_settings
+from src.core.ai_scanner import ProviderResult
 from src.core.project_manager import ProjectManager
+from src.interfaces.cli import commands
 from src.interfaces.cli.commands import CommandContext, execute_command
 from src.interfaces.cli.notifier import CLINotifier
 
@@ -286,3 +288,47 @@ async def test_resume_by_project_name_restores_state(
     assert outcome.ok is True
     assert context.current_state["project_name"] == "CaglarKc NutritionApp"
     assert context.current_state["current_thread_id"] == original_thread
+
+
+@pytest.mark.asyncio
+async def test_scan_command_renders_health_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeScanner:
+        async def scan_all(self):  # noqa: ANN201
+            return [
+                ProviderResult(
+                    provider="gemini",
+                    available=True,
+                    model_name="gemini-test",
+                    detail="response_ok:pong",
+                    latency_ms=321,
+                    output_tokens=2,
+                    tokens_per_second=6.23,
+                    response_preview="pong",
+                ),
+                ProviderResult(
+                    provider="openrouter_primary",
+                    available=False,
+                    model_name="model-x",
+                    detail="api_key_missing",
+                ),
+            ]
+
+    monkeypatch.setattr(commands, "AIScanner", FakeScanner)
+    context = CommandContext(
+        event_bus=FakeEventBus(),
+        graph_manager=None,
+        notifier=CLINotifier(),
+        state_manager=FakeStateManager(),
+        current_state=None,
+        active_approval=None,
+    )
+
+    outcome = await execute_command("/scan", context)
+
+    assert outcome.ok is True
+    assert "✓ gemini  gemini-test  response_ok:pong" in outcome.message
+    assert "latency=321ms" in outcome.message
+    assert "out_tokens=2" in outcome.message
+    assert "tok/s=6.23" in outcome.message
+    assert "response='pong'" in outcome.message
+    assert "✗ openrouter_primary  model-x  api_key_missing" in outcome.message
