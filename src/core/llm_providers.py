@@ -63,6 +63,30 @@ def _render_stub_file_content(target_file: str, *, task_description: str = "") -
         )
     if target_file.endswith(".json"):
         return "{}\n"
+    if target_file == "index.html":
+        return (
+            "<!doctype html>\n"
+            '<html lang="tr">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            "<title>Restoran</title>\n"
+            '<link rel="stylesheet" href="styles.css">\n'
+            "</head>\n<body>\n"
+            '<header><nav><button id="menu-button">Menu</button><ul id="nav-menu"><li><a href="#rezervasyon">Rezervasyon</a></li></ul></nav></header>\n'
+            '<main><section id="hero"><h1>Restoran</h1></section><section id="rezervasyon"><form><input name="name"><button type="submit">Gonder</button></form></section></main>\n'
+            '<script src="script.js"></script>\n</body>\n</html>\n'
+        )
+    if target_file in {"styles.css", "style.css"}:
+        return "body { font-family: Arial, sans-serif; margin: 0; } #nav-menu.open { display: block; }\n"
+    if target_file == "script.js":
+        return (
+            "document.addEventListener('DOMContentLoaded', () => {\n"
+            "  const button = document.getElementById('menu-button');\n"
+            "  const menu = document.getElementById('nav-menu');\n"
+            "  if (button && menu) button.addEventListener('click', () => menu.classList.toggle('open'));\n"
+            "  const form = document.querySelector('#rezervasyon form');\n"
+            "  if (form) form.addEventListener('submit', (event) => event.preventDefault());\n"
+            "});\n"
+        )
     return f"# generated fallback for {target_file}\n"
 
 
