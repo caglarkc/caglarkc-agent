@@ -47,7 +47,7 @@ Bu servis su an CLI acmadan daemon baslatir:
 ./.venv/bin/python main.py
 ```
 
-## CLI Icinde Task/Resume Testi
+## Yeni Ana CLI Akisi
 
 CLI'yi ac:
 
@@ -69,22 +69,24 @@ Projeleri gor:
 /projects
 ```
 
-Gerekirse aktif proje sec:
+Yeni proje/sohbet baslat:
 
 ```text
-/project use <project_id>
+/new CaglarKc NutritionApp
 ```
 
-Task baslat:
+Projeyi anlatmaya devam et:
 
 ```text
-/task Kucuk bir Python CLI hesap makinesi icin plan yap, henuz kod yazma
+/r Kullanici gunluk kalori ve makro takibi yapacak
+/r Premium uyelikte haftalik beslenme raporu olacak
+/r Mobil oncelikli sade bir uygulama istiyorum
 ```
 
 Beklenen:
 
 ```text
-Task queued [thread-...]: Kucuk bir Python CLI hesap makinesi...
+Message queued [thread-...]: ...
 ```
 
 Durumu kontrol et:
@@ -96,7 +98,7 @@ Durumu kontrol et:
 Beklenen:
 - `thread-...` task ID olarak gorunur.
 - Gemini manager cevap verir.
-- Henuz kod yazma dedigin icin worker/sprint baslamaz.
+- `/plan` demedigin icin worker/sprint baslamaz.
 - Durum `draft_ready`, `needs_input` veya planlama durumunda kalir.
 
 CLI'yi kapat:
@@ -111,10 +113,11 @@ Tekrar ac:
 ./.venv/bin/python main.py --cli --no-telegram
 ```
 
-Ayni task'a devam et:
+Ayni projeye/sohbete devam et:
 
 ```text
-/task Renkleri sade tut, hala kod yazma
+/resume
+/r Renkleri sade tut, onboarding cok kisa olsun
 ```
 
 Beklenen:
@@ -122,14 +125,26 @@ Beklenen:
 - Onceki task ile ayni thread ID devam eder.
 - Gemini onceki konusma ve draft plani hatirlayarak cevap verir.
 
-Uygulamaya gecirmek icin:
+Belirli projeyi resume et:
 
 ```text
-/apply
+/resume CaglarKc NutritionApp
+```
+
+veya:
+
+```text
+/resume <project_id>
+```
+
+Sohbetten plana gecmek icin:
+
+```text
+/plan CaglarKc NutritionApp
 ```
 
 Beklenen:
-- `Current draft sent for execution review [thread-...]`
+- `Planning requested [thread-...]`
 - Approval panelde approval ID olusur.
 - Sistem onay bekler; worker akisi onaysiz baslamaz.
 
@@ -181,6 +196,10 @@ Bu komutlardan sonra sonraki `/task ...` yeni `thread-...` ile baslar.
 
 ```text
 /task <metin>
+/new <proje adi>
+/resume [project_id veya proje adi]
+/r <mesaj>
+/plan [project_id veya proje adi]
 /apply [istege bagli not]
 /status
 /approve [approval_id]
@@ -189,10 +208,12 @@ Bu komutlardan sonra sonraki `/task ...` yeni `thread-...` ile baslar.
 /close [reason]
 /projects
 /history <proje>
-/project use <id>
+/project use <id veya proje adi>
 /scan
 /help
 ```
+
+Not: `/task` eski alias olarak duruyor. Yeni ana sohbet komutu `/r`.
 
 ## Saglik ve Test Komutlari
 
@@ -281,11 +302,12 @@ data/langgraph_checkpoints.sqlite
 Bu akis basarili sayilir:
 
 1. `./.venv/bin/python main.py --cli --no-telegram` CLI'yi acar.
-2. `/task ... henuz kod yazma` sana `thread-...` ID dondurur.
-3. CLI kapat/ac sonrasi yeni `/task ... hala kod yazma` ayni thread ID ile devam eder.
-4. Gemini onceki konusmayi ve draft plani hatirlar.
-5. `/apply` approval olusturur ve bekler.
-6. `/approve` sonrasi worker akisi baslar.
+2. `/new CaglarKc NutritionApp` kullanici isimli proje olusturur.
+3. `/r ...` sana `thread-...` ID dondurur.
+4. CLI kapat/ac sonrasi `/resume` ve `/r ...` ayni thread ID ile devam eder.
+5. Gemini onceki konusmayi ve draft plani hatirlar.
+6. `/plan CaglarKc NutritionApp` approval olusturur ve bekler.
+7. `/approve` sonrasi worker akisi baslar.
 
 ## Notlar
 
