@@ -363,3 +363,34 @@ async def test_start_command_approves_pending_plan() -> None:
     event_name, payload = event_bus.events[0]
     assert event_name == "plan.approved"
     assert payload["payload"]["approval_id"] == "approval-1"
+
+
+@pytest.mark.asyncio
+async def test_recover_command_invokes_graph_manager() -> None:
+    state_manager = FakeStateManager()
+
+    class FakeGraphManager:
+        async def recover_project_execution(self, project_ref=None):  # noqa: ANN001
+            return {
+                "ok": True,
+                "project_id": "project-1",
+                "project_name": project_ref or "active",
+                "thread_id": "thread-1",
+                "next_node": "dispatcher",
+                "actions": ["requeued stale assignment script.js"],
+            }
+
+    await state_manager.set("project-1", {"project_id": "project-1", "project_name": "Demo"})
+    context = CommandContext(
+        event_bus=FakeEventBus(),
+        graph_manager=FakeGraphManager(),
+        notifier=CLINotifier(),
+        state_manager=state_manager,
+        current_state={"project_id": "project-1", "project_name": "Demo"},
+        active_approval=None,
+    )
+
+    outcome = await execute_command("/recover Demo", context)
+
+    assert outcome.ok is True
+    assert "next=dispatcher" in outcome.message
