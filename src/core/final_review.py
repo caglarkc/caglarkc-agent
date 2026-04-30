@@ -84,71 +84,51 @@ def _review_prompt(state: dict, file_snapshots: list[dict[str, str]]) -> str:
     return _clip(json.dumps(payload, ensure_ascii=False, indent=2), limit=MAX_REVIEW_CHARS)
 
 
-async def _ollama_review(prompt: str) -> dict[str, Any]:
+async def _openrouter_review(prompt: str, *, provider: str, model_name: str, api_key: str) -> dict[str, Any]:
     settings = get_settings()
+    if not api_key:
+        return {"approved": True, "summary": f"{provider} final review skipped: API key missing.", "issues": [], "skipped": True}
     async with httpx.AsyncClient(timeout=settings.final_review_timeout_seconds) as client:
         response = await client.post(
-            f"{settings.ollama_base_url.rstrip('/')}/api/chat",
+            f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://local.phase1.final-review",
+                "X-Title": "AI Development Team Orchestrator Final Review",
+            },
             json={
-                "model": settings.ollama_model,
+                "model": model_name,
                 "messages": [
                     {
                         "role": "system",
                         "content": (
-                            "You are the final local code auditor. Inspect generated files and executor output. "
+                            "You are a strict final code auditor. Inspect generated files and executor output. "
                             "Return only JSON with keys: approved:boolean, summary:string, issues:array. "
-                            "Each issue must include target_file, code, message, severity."
+                            "Each issue must include target_file, code, message, severity. "
+                            "Approve only when the implementation is coherent, runnable, and matches the user's request."
                         ),
                     },
                     {"role": "user", "content": prompt},
                 ],
-                "stream": False,
-                "options": {"temperature": 0},
+                "temperature": 0,
             },
         )
         response.raise_for_status()
-        content = (response.json().get("message") or {}).get("content") or ""
+        choices = response.json().get("choices") or []
+        content = ""
+        if choices and isinstance(choices[0], dict):
+            content = ((choices[0].get("message") or {}).get("content") or "")
     payload = _extract_json(content)
     if not payload:
-        return {"approved": True, "summary": "Local final review returned non-JSON output.", "issues": [], "raw": _clip(content, limit=1_500)}
+        return {
+            "approved": True,
+            "summary": f"{provider} final review returned non-JSON output.",
+            "issues": [],
+            "raw": _clip(content, limit=1_500),
+        }
+    payload.setdefault("provider", provider)
+    payload.setdefault("model", model_name)
     return payload
-
-
-async def _gemini_final_check(prompt: str, local_review: dict[str, Any]) -> dict[str, Any]:
-    settings = get_settings()
-    if not settings.gemini_api_key:
-        return {"approved": True, "summary": "Gemini final check skipped: GEMINI_API_KEY missing.", "issues": []}
-    url = f"{settings.gemini_base_url.rstrip('/')}/v1beta/models/{settings.manager_model}:generateContent"
-    review_prompt = (
-        "You are the Gemini project manager final checker. Return only JSON with keys: approved:boolean, summary:string, issues:array.\n\n"
-        f"LOCAL_REVIEW:\n{json.dumps(local_review, ensure_ascii=False)}\n\nPROJECT_CONTEXT:\n{prompt}"
-    )
-    last_error: Exception | None = None
-    async with httpx.AsyncClient(timeout=settings.final_review_timeout_seconds) as client:
-        for _ in range(3):
-            try:
-                response = await client.post(
-                    url,
-                    params={"key": settings.gemini_api_key},
-                    json={"contents": [{"parts": [{"text": review_prompt}]}], "generationConfig": {"temperature": 0}},
-                )
-                response.raise_for_status()
-                payload = response.json()
-                break
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {429, 500, 502, 503, 504}:
-                    continue
-                raise
-        else:
-            raise RuntimeError(_safe_error(last_error or RuntimeError("Gemini final check failed")))
-    candidates = payload.get("candidates") or []
-    parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
-    content = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
-    parsed = _extract_json(content)
-    if not parsed:
-        return {"approved": True, "summary": "Gemini final check returned non-JSON output.", "issues": [], "raw": _clip(content, limit=1_500)}
-    return parsed
 
 
 def _issues_from_review(review: dict[str, Any], *, source: str) -> list[dict[str, Any]]:
@@ -185,25 +165,45 @@ async def run_final_project_review(state: dict) -> dict[str, Any]:
     file_snapshots = await _read_generated_files(project_root, sorted(state.get("file_registry", {}).keys()))
     prompt = _review_prompt(state, file_snapshots)
     try:
-        local_review = await _ollama_review(prompt)
+        primary_review = await _openrouter_review(
+            prompt,
+            provider="openrouter_primary",
+            model_name=settings.openrouter_model,
+            api_key=settings.openrouter_api_key_primary,
+        )
     except Exception as exc:  # noqa: BLE001
-        local_review = {"approved": True, "summary": f"Local final review unavailable: {_safe_error(exc)}", "issues": [], "skipped": True}
-    try:
-        gemini_review = await _gemini_final_check(prompt, local_review)
-    except Exception as exc:  # noqa: BLE001
-        gemini_review = {
-            "approved": bool(local_review.get("approved", True)),
-            "summary": f"Gemini final check unavailable: {_safe_error(exc)}",
+        primary_review = {
+            "approved": True,
+            "summary": f"OpenRouter primary final review unavailable: {_safe_error(exc)}",
             "issues": [],
             "skipped": True,
         }
-    local_issues = _issues_from_review(local_review, source="local")
-    gemini_issues = _issues_from_review(gemini_review, source="gemini")
-    approved = bool(local_review.get("approved", True)) and bool(gemini_review.get("approved", True)) and not local_issues and not gemini_issues
+    try:
+        secondary_review = await _openrouter_review(
+            prompt,
+            provider="openrouter_secondary",
+            model_name=settings.openrouter_model_secondary,
+            api_key=settings.openrouter_api_key_secondary,
+        )
+    except Exception as exc:  # noqa: BLE001
+        secondary_review = {
+            "approved": bool(primary_review.get("approved", True)),
+            "summary": f"OpenRouter secondary final review unavailable: {_safe_error(exc)}",
+            "issues": [],
+            "skipped": True,
+        }
+    primary_issues = _issues_from_review(primary_review, source="openrouter_primary")
+    secondary_issues = _issues_from_review(secondary_review, source="openrouter_secondary")
+    approved = (
+        bool(primary_review.get("approved", True))
+        and bool(secondary_review.get("approved", True))
+        and not primary_issues
+        and not secondary_issues
+    )
     return {
         "approved": approved,
-        "summary": f"local={local_review.get('summary', '')} | gemini={gemini_review.get('summary', '')}",
-        "issues": [*local_issues, *gemini_issues],
-        "local_review": local_review,
-        "gemini_review": gemini_review,
+        "summary": f"primary={primary_review.get('summary', '')} | secondary={secondary_review.get('summary', '')}",
+        "issues": [*primary_issues, *secondary_issues],
+        "primary_review": primary_review,
+        "secondary_review": secondary_review,
     }
