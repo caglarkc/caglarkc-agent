@@ -8,11 +8,18 @@ from uuid import uuid4
 from src.core.contracts import new_event
 from src.core.ai_scanner import AIScanner
 from src.core.project_manager import ProjectManager
+from src.graph.state import build_initial_state
 from src.interfaces.cli.notifier import CLINotifier
 from src.interfaces.cli.state_view import format_project_history, format_projects_listing, format_status_summary
 
 
 TERMINAL_TASK_STATUSES = {"closed", "rejected", "cancelled"}
+PLAN_FROM_CONVERSATION_PROMPT = (
+    "Bu projenin sohbet gecmisindeki istekleri toparla. Kullanıcının hedefini netlestir, "
+    "eksik belirsizlikleri minimumda tutarak uygulanabilir bir proje planina cevir. "
+    "Cikacak isi 1-3 AI worker gorevine bol, dosya listesini ve bagimliliklari belirle. "
+    "Bu cevap planlama moduna gecis icindir; JSON plan alanini mutlaka doldur ve execution_intent=apply dondur."
+)
 
 
 def _ensure_thread_id(state: dict[str, Any]) -> str:
@@ -45,6 +52,10 @@ def _ensure_thread_id(state: dict[str, Any]) -> str:
 HELP_TEXT = "\n".join(
     [
         "/task <metin>",
+        "/new <proje adi>",
+        "/resume [project_id veya proje adi]",
+        "/r <mesaj>",
+        "/plan [project_id veya proje adi]",
         "/apply [istege bagli not]",
         "/status",
         "/approve [approval_id]  (yalnızca olay günlüğünde plan onayı istendiğinde veya Approval panelde ID varken)",
@@ -102,25 +113,16 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
         return CommandOutcome(ok=False, message=f"Unknown input. Use /help.\n{HELP_TEXT}", level="error")
     if command.name == "help":
         return CommandOutcome(ok=True, message=HELP_TEXT)
+    if command.name == "new":
+        return await _handle_new_command(command, context)
+    if command.name == "resume":
+        return await _handle_resume_command(command, context)
+    if command.name == "r":
+        return await _publish_chat_message(command, context, command_name="/r")
+    if command.name == "plan":
+        return await _handle_plan_command(command, context)
     if command.name == "task":
-        if not command.args:
-            return CommandOutcome(ok=False, message="Usage: /task <metin>", level="error")
-        task_text = " ".join(command.args)
-        state = context.current_state or {}
-        thread_id = _ensure_thread_id(state)
-        active_project = await ProjectManager().active_project()
-        project_id = active_project.project_id if active_project else state.get("project_id")
-        await context.event_bus.publish(
-            "task.received",
-            new_event(
-                "task.received",
-                payload={"task_description": task_text, "task_id": thread_id},
-                project_id=project_id,
-                thread_id=thread_id,
-                correlation_id=project_id,
-            ).model_dump(),
-        )
-        return CommandOutcome(ok=True, message=f"Task queued [{thread_id}]: {task_text}")
+        return await _publish_chat_message(command, context, command_name="/task")
     if command.name == "apply":
         state = context.current_state or {}
         thread_id = _ensure_thread_id(state)
@@ -180,6 +182,147 @@ async def _handle_projects_command() -> CommandOutcome:
         ok=True,
         message=format_projects_listing(projects, active_project_id=active.project_id if active else None),
     )
+
+
+async def _persist_state(context: CommandContext, project_id: str, state: dict[str, Any]) -> None:
+    if hasattr(context.state_manager, "set"):
+        await context.state_manager.set(project_id, state)
+    elif hasattr(context.state_manager, "update"):
+        await context.state_manager.update(project_id, state)
+    if hasattr(context.state_manager, "flush_to_disk"):
+        await context.state_manager.flush_to_disk()
+
+
+async def _state_for_project(context: CommandContext, project_id: str) -> dict[str, Any]:
+    if hasattr(context.state_manager, "get"):
+        state = await context.state_manager.get(project_id, {})
+        if isinstance(state, dict):
+            return state
+    snapshot = await context.state_manager.snapshot() if hasattr(context.state_manager, "snapshot") else {}
+    state = snapshot.get(project_id, {}) if isinstance(snapshot, dict) else {}
+    return state if isinstance(state, dict) else {}
+
+
+async def _latest_live_state(context: CommandContext) -> dict[str, Any] | None:
+    snapshot = await context.state_manager.snapshot() if hasattr(context.state_manager, "snapshot") else {}
+    if not isinstance(snapshot, dict):
+        return None
+    candidates = [item for item in snapshot.values() if isinstance(item, dict)]
+    live = [item for item in candidates if item.get("planning_status") not in TERMINAL_TASK_STATUSES]
+    return (live or candidates)[-1] if (live or candidates) else None
+
+
+async def _select_project_state(context: CommandContext, project_ref: str | None = None) -> tuple[Any, dict[str, Any]]:
+    manager = ProjectManager()
+    project = await manager.get_project(project_ref) if project_ref else await manager.active_project()
+    if project is None and not project_ref:
+        state = await _latest_live_state(context)
+        if state and state.get("project_id"):
+            project = await manager.get_project(state["project_id"])
+    if project is None:
+        raise LookupError(project_ref or "active project")
+    await manager.select_active_project(project.project_id)
+    state = await _state_for_project(context, project.project_id)
+    if not state:
+        thread_id = f"thread-{uuid4().hex}"
+        state = build_initial_state(
+            project_name=project.name,
+            task_description="",
+            project_id=project.project_id,
+            current_thread_id=thread_id,
+        )
+        state["planning_status"] = "chat_ready"
+        await _persist_state(context, project.project_id, state)
+    context.current_state = state
+    context.active_approval = state.get("approval_request") if state.get("awaiting_approval") else None
+    return project, state
+
+
+async def _handle_new_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    if not command.args:
+        return CommandOutcome(ok=False, message="Usage: /new <proje adi>", level="error")
+    name = " ".join(command.args).strip()
+    try:
+        project = await ProjectManager().create_project(name, selected=True)
+    except ValueError as exc:
+        return CommandOutcome(ok=False, message=str(exc), level="error")
+    thread_id = f"thread-{uuid4().hex}"
+    state = build_initial_state(
+        project_name=project.name,
+        task_description="",
+        project_id=project.project_id,
+        current_thread_id=thread_id,
+    )
+    state["planning_status"] = "chat_ready"
+    await _persist_state(context, project.project_id, state)
+    context.current_state = state
+    context.active_approval = None
+    return CommandOutcome(ok=True, message=f"New project: {project.project_id} | {project.name} | thread={thread_id}")
+
+
+async def _handle_resume_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    project_ref = " ".join(command.args).strip() or None
+    try:
+        project, state = await _select_project_state(context, project_ref)
+    except LookupError:
+        return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+    thread_id = state.get("planning_thread_id") or state.get("current_thread_id")
+    return CommandOutcome(ok=True, message=f"Resumed: {project.project_id} | {project.name} | thread={thread_id}")
+
+
+async def _publish_chat_message(command: ParsedCommand, context: CommandContext, *, command_name: str) -> CommandOutcome:
+    if not command.args:
+        return CommandOutcome(ok=False, message=f"Usage: {command_name} <mesaj>", level="error")
+    task_text = " ".join(command.args)
+    state = context.current_state
+    if not state or not state.get("project_id"):
+        try:
+            _, state = await _select_project_state(context)
+        except LookupError:
+            return CommandOutcome(ok=False, message="Once /new <proje adi> ile proje olustur veya /resume ile proje sec.", level="warning")
+    thread_id = _ensure_thread_id(state)
+    project_id = state.get("project_id")
+    if not project_id:
+        return CommandOutcome(ok=False, message="Aktif proje yok. Once /new <proje adi> kullan.", level="warning")
+    await context.event_bus.publish(
+        "task.received",
+        new_event(
+            "task.received",
+            payload={"task_description": task_text, "task_id": thread_id, "chat_message": True},
+            project_id=project_id,
+            thread_id=thread_id,
+            correlation_id=project_id,
+        ).model_dump(),
+    )
+    return CommandOutcome(ok=True, message=f"Message queued [{thread_id}]: {task_text}")
+
+
+async def _handle_plan_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    project_ref = " ".join(command.args).strip() or None
+    try:
+        project, state = await _select_project_state(context, project_ref)
+    except LookupError:
+        return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+    if not state.get("conversation_history"):
+        return CommandOutcome(ok=False, message="Plan icin sohbet gecmisi yok. Once /r ile projeyi anlat.", level="warning")
+    thread_id = _ensure_thread_id(state)
+    await context.event_bus.publish(
+        "task.received",
+        new_event(
+            "task.received",
+            payload={
+                "task_description": PLAN_FROM_CONVERSATION_PROMPT,
+                "execution_requested": True,
+                "task_id": thread_id,
+                "suppress_user_turn": True,
+                "plan_from_conversation": True,
+            },
+            project_id=project.project_id,
+            thread_id=thread_id,
+            correlation_id=project.project_id,
+        ).model_dump(),
+    )
+    return CommandOutcome(ok=True, message=f"Planning requested [{thread_id}]: {project.project_id} | {project.name}")
 
 
 async def _handle_history_command(command: ParsedCommand) -> CommandOutcome:
