@@ -8,8 +8,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from src.config.settings import get_settings
-from src.graph.edges import route_after_dispatch, route_after_planner, route_after_review, route_after_worker
+from src.graph.edges import route_after_dispatch, route_after_planner, route_after_review, route_after_validator, route_after_worker
 from src.graph.nodes.dispatcher import dispatcher_node
+from src.graph.nodes.executor import executor_node
 from src.graph.nodes.planner import planner_node
 from src.graph.nodes.reviewer import reviewer_node
 from src.graph.nodes.validator import validator_node
@@ -28,14 +29,16 @@ def build_graph(checkpointer: AsyncSqliteSaver):
     builder.add_node("planner", planner_node)
     builder.add_node("dispatcher", dispatcher_node)
     builder.add_node("worker", worker_node)
+    builder.add_node("executor", executor_node)
     builder.add_node("validator", validator_node)
     builder.add_node("reviewer", reviewer_node)
 
     builder.add_edge(START, "planner")
     builder.add_conditional_edges("planner", route_after_planner, {"dispatcher": "dispatcher", END: END})
-    builder.add_conditional_edges("dispatcher", route_after_dispatch, {"worker": "worker", "reviewer": "reviewer"})
-    builder.add_conditional_edges("worker", route_after_worker, {"validator": "validator"})
-    builder.add_edge("validator", "reviewer")
+    builder.add_conditional_edges("dispatcher", route_after_dispatch, {"planner": "planner", "worker": "worker", "reviewer": "reviewer"})
+    builder.add_conditional_edges("worker", route_after_worker, {"planner": "planner", "executor": "executor"})
+    builder.add_edge("executor", "validator")
+    builder.add_conditional_edges("validator", route_after_validator, {"planner": "planner", "dispatcher": "dispatcher", "reviewer": "reviewer"})
     builder.add_conditional_edges("reviewer", route_after_review, {"dispatcher": "dispatcher", END: END})
     return builder.compile(checkpointer=checkpointer)
 

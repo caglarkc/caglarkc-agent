@@ -26,7 +26,17 @@ def route_after_dispatch(state: dict) -> str:
 def route_after_worker(state: dict) -> str:
     if state.get("scope_changed"):
         return "planner"
-    return "validator"
+    return "executor"
+
+
+def route_after_validator(state: dict) -> str:
+    if state.get("scope_changed"):
+        return "planner"
+    if state.get("validation_issues"):
+        return "reviewer"
+    if any(item.get("status") == "planned" for item in state.get("worker_queue", [])):
+        return "dispatcher"
+    return "reviewer"
 
 
 def route_after_review(state: dict) -> str:
