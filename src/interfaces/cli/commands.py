@@ -209,6 +209,13 @@ async def _handle_project_command(command: ParsedCommand, context: CommandContex
 
 async def _handle_approval_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
     active = context.active_approval
+    guard = context.graph_manager.approval_guard if context.graph_manager is not None else None
+    if command.name in {"reject", "cancel"} and active is None:
+        explicit_request = None
+        if guard is not None and command.args:
+            explicit_request = await guard.get_approval(command.args[0])
+        if explicit_request is None:
+            return await _close_current_task(command, context, status={"reject": "rejected", "cancel": "cancelled"}[command.name])
     approval_id: str | None = command.args[0] if command.args else None
     reason = " ".join(command.args[1:]) if len(command.args) > 1 else ""
     if approval_id is None and active is not None:
@@ -225,7 +232,6 @@ async def _handle_approval_command(command: ParsedCommand, context: CommandConte
             level="warning",
         )
 
-    guard = context.graph_manager.approval_guard if context.graph_manager is not None else None
     if guard is not None:
         request = await guard.get_approval(approval_id)
         if request is None or request.status != "pending":
