@@ -5,6 +5,8 @@
 
 # Test checkpoint SQLite files
 data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
 data/*.sqlite.bak
 data/fullstack-smoke-*/
 data/backup-restore-*/
@@ -19,5 +21,4 @@ data/orchestrator.db
 logs/
 
 # Generated project outputs from tests
-projects/phase*/
-projects/resume-project/
+projects/
