@@ -339,13 +339,17 @@ async def _handle_plan_command(command: ParsedCommand, context: CommandContext) 
 
 async def _handle_start_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
     project_ref = " ".join(command.args).strip() or None
-    try:
-        project, state = await _select_project_state(context, project_ref)
-    except LookupError:
-        if project_ref or not context.current_state:
-            return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+    if not project_ref and context.current_state and context.current_state.get("awaiting_approval"):
         project = None
         state = context.current_state
+    else:
+        try:
+            project, state = await _select_project_state(context, project_ref)
+        except LookupError:
+            if project_ref or not context.current_state:
+                return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+            project = None
+            state = context.current_state
     approval = state.get("approval_request")
     if not state.get("awaiting_approval") or not isinstance(approval, dict):
         return CommandOutcome(
