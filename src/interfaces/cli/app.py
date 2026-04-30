@@ -91,12 +91,16 @@ class OrchestratorCLIApp(App[None]):
         self.set_interval(1.0, self.refresh_approval_panel)
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
+        command_context = self._command_context()
         outcome = await execute_command(
             event.value,
-            self._command_context(),
+            command_context,
         )
+        self.current_state = command_context.current_state
+        self.active_approval = command_context.active_approval
         self._log_notification(getattr(self.notifier, outcome.level)(outcome.message))
         event.input.value = ""
+        self.refresh_panels()
 
     async def _hydrate_from_state_manager(self) -> None:
         snapshot = await self.state_manager.snapshot()
