@@ -36,3 +36,6 @@ smoke-test = "scripts.check_connections:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "scripts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
