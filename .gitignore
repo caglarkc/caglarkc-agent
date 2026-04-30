@@ -1,7 +1,6 @@
 /.venv/
 **/__pycache__/
 *.py[cod]
-.env
 
 # Test checkpoint SQLite files
 data/*.sqlite
