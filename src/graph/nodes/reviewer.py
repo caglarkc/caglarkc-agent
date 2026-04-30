@@ -135,11 +135,6 @@ async def reviewer_node(state: dict) -> dict:
         decision_rationale = "There are still planned items waiting to run."
         await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="active", review_cycles=review_cycles)
     elif all(status == "done" for status in file_registry.values()):
-<<<<<<< Updated upstream
-        await EventBus().emit(
-            "sprint.completed",
-            new_event(
-=======
         final_review = await run_final_project_review(state)
         final_review_issues = deepcopy(final_review.get("issues", []))
         if final_review_issues:
@@ -175,36 +170,38 @@ async def reviewer_node(state: dict) -> dict:
             )
         else:
             await EventBus().emit(
->>>>>>> Stashed changes
                 "sprint.completed",
-                payload={"result": "approved", "files": list(file_registry.keys())},
-                project_id=project_id,
-                thread_id=thread_id,
-                sprint_id=sprint_id,
-                correlation_id=project_id,
-            ).model_dump(),
-        )
-        updates = {
-            "sprint_status": "approved",
-            "review_cycles": review_cycles,
-            "messages": ["reviewer approved sprint"],
-            "validation_issues": [],
-            "revision_tasks": [],
-            "contract_completed": state.get("contract_completed", False) or state.get("sprint_type") == "contract",
-            "reviewer_decision": "approved",
-        }
-        decision_summary = "Reviewer approved sprint outputs."
-        decision_rationale = "All files completed and validator produced no blocking issues."
-        await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="approved", review_cycles=review_cycles)
-        await ProjectManager().update_plan_snapshot(
-            state["project_name"],
-            sprint_number=state.get("current_sprint", 1),
-            sprint_type=state.get("sprint_type", "feature"),
-            status="approved",
-            files=list(file_registry.keys()),
-            dependencies=state.get("dependencies", {}),
-            plan_version=state.get("plan_version", 1),
-        )
+                new_event(
+                    "sprint.completed",
+                    payload={"result": "approved", "files": list(file_registry.keys()), "final_review": final_review},
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    sprint_id=sprint_id,
+                    correlation_id=project_id,
+                ).model_dump(),
+            )
+            updates = {
+                "sprint_status": "approved",
+                "review_cycles": review_cycles,
+                "messages": ["reviewer approved sprint"],
+                "validation_issues": [],
+                "revision_tasks": [],
+                "contract_completed": state.get("contract_completed", False) or state.get("sprint_type") == "contract",
+                "final_review": final_review,
+                "reviewer_decision": "approved",
+            }
+            decision_summary = "Reviewer approved sprint outputs."
+            decision_rationale = "All files completed, executor/validator passed, and final model review found no blocking issues."
+            await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="approved", review_cycles=review_cycles)
+            await ProjectManager().update_plan_snapshot(
+                state["project_name"],
+                sprint_number=state.get("current_sprint", 1),
+                sprint_type=state.get("sprint_type", "feature"),
+                status="approved",
+                files=list(file_registry.keys()),
+                dependencies=state.get("dependencies", {}),
+                plan_version=state.get("plan_version", 1),
+            )
     else:
         updates = {
             "sprint_status": "fail",
