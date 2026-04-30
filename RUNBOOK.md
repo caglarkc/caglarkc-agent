@@ -154,7 +154,21 @@ Beklenen:
 - Approval panelde approval ID olusur.
 - Sistem onay bekler; worker akisi onaysiz baslamaz.
 
-Onayla:
+Plani baslat:
+
+```text
+/start
+```
+
+veya proje belirterek:
+
+```text
+/start CaglarKc NutritionApp
+```
+
+`/start`, bekleyen plan approval'ini onaylar ve worker akisini baslatir.
+
+Alternatif olarak elle onayla:
 
 ```text
 /approve
@@ -206,6 +220,7 @@ Bu komutlardan sonra sonraki `/r ...` veya legacy `/task ...` yeni `thread-...` 
 /resume [project_id veya proje adi]
 /r <mesaj>
 /plan [project_id veya proje adi]
+/start [project_id veya proje adi]
 /apply [istege bagli not]
 /status
 /approve [approval_id]
@@ -313,7 +328,7 @@ Bu akis basarili sayilir:
 4. CLI kapat/ac sonrasi `/resume` ve `/r ...` ayni thread ID ile devam eder.
 5. Gemini onceki konusmayi ve draft plani hatirlar.
 6. `/plan CaglarKc NutritionApp` approval olusturur ve bekler.
-7. `/approve` sonrasi worker akisi baslar.
+7. `/start` veya `/approve` sonrasi worker akisi baslar.
 
 ## Notlar
 
