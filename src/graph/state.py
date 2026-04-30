@@ -44,7 +44,7 @@ class OrchestratorState(TypedDict, total=False):
     planning_thread_id: Annotated[str | None, lambda a, b: b]
     scope_changed: bool
     errors: Annotated[list[dict[str, Any]], operator.add]
-    messages: Annotated[list[str], operator.add]
+    messages: Annotated[list[str], lambda a, b: (a + b)[-100:]]
     active_assignment: dict[str, Any] | None
     active_assignments: dict[str, dict[str, Any]]
     approval_request: dict[str, Any] | None
