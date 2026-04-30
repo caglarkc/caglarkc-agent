@@ -106,3 +106,32 @@ async def test_retryable_failure_reassigns_to_another_worker(
     assert first_worker == "worker_a"
     assert reassigned_worker == "worker_b"
     assert state["worker_queue"][0]["status"] == "planned"
+
+
+@pytest.mark.asyncio
+async def test_retryable_failure_prefers_unloaded_third_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_paths(monkeypatch, tmp_path)
+    state = build_initial_state(
+        project_name="worker-third-fallback",
+        task_description="retryable fallback to third worker",
+        current_thread_id="thread-third-fallback",
+    )
+    entry = _queue_entry(state, "fragile-task", "fragile.py", simulate_error="retryable")
+    entry["assignment"]["worker_id"] = "worker_b"
+    state.update(
+        {
+            "dependencies": {"fragile.py": []},
+            "file_registry": {"fragile.py": "reserved"},
+            "worker_queue": [entry],
+            "active_assignment": entry["assignment"],
+            "worker_status": {"worker_a": "idle", "worker_b": "reserved", "worker_c": "idle"},
+            "worker_outputs": {"worker_a": ["index.html"], "worker_b": [], "worker_c": []},
+        }
+    )
+
+    state = _merge(state, await worker_node(state))
+
+    assert state["worker_queue"][0]["assignment"]["worker_id"] == "worker_c"
