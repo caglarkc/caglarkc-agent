@@ -99,6 +99,7 @@ class GraphManager:
         payload = envelope.payload or {}
         task_description = payload.get("task_description")
         execution_requested = bool(payload.get("execution_requested"))
+        suppress_user_turn = bool(payload.get("suppress_user_turn"))
         if isinstance(task_description, str):
             task_description = task_description.strip()
         else:
@@ -167,8 +168,11 @@ class GraphManager:
         try:
             if existing_state and self.project_id_for_thread(thread_id) == project_id:
                 state_update = {
+                    "project_id": project_id,
+                    "project_name": project.name,
                     "task_description": task_description or existing_state.get("task_description", ""),
                     "execution_requested": execution_requested,
+                    "suppress_user_turn": suppress_user_turn,
                     "planning_thread_id": thread_id,
                     "current_thread_id": thread_id,
                 }
@@ -182,6 +186,7 @@ class GraphManager:
                     current_thread_id=thread_id,
                 )
                 initial["execution_requested"] = execution_requested
+                initial["suppress_user_turn"] = suppress_user_turn
                 initial["planning_thread_id"] = thread_id
                 await self.graph.ainvoke(initial, config=config)
             snapshot = await self.graph.aget_state(config)

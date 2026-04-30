@@ -6,9 +6,40 @@ from typing import Any
 from uuid import uuid4
 
 from src.core.contracts import new_event
+from src.core.ai_scanner import AIScanner
 from src.core.project_manager import ProjectManager
 from src.interfaces.cli.notifier import CLINotifier
 from src.interfaces.cli.state_view import format_project_history, format_projects_listing, format_status_summary
+
+
+TERMINAL_TASK_STATUSES = {"closed", "rejected", "cancelled"}
+
+
+def _ensure_thread_id(state: dict[str, Any]) -> str:
+    if state.get("planning_status") in TERMINAL_TASK_STATUSES:
+        thread_id = f"thread-{uuid4().hex}"
+        state.update(
+            {
+                "planning_thread_id": thread_id,
+                "current_thread_id": thread_id,
+                "planning_status": "idle",
+                "manager_reply": None,
+                "draft_plan": None,
+                "conversation_history": [],
+                "worker_queue": [],
+                "approval_request": None,
+                "awaiting_approval": False,
+                "active_approval_id": None,
+            }
+        )
+        return thread_id
+    thread_id = state.get("planning_thread_id") or state.get("current_thread_id")
+    if isinstance(thread_id, str) and thread_id.strip():
+        return thread_id.strip()
+    thread_id = f"thread-{uuid4().hex}"
+    state["planning_thread_id"] = thread_id
+    state["current_thread_id"] = thread_id
+    return thread_id
 
 
 HELP_TEXT = "\n".join(
@@ -19,9 +50,11 @@ HELP_TEXT = "\n".join(
         "/approve [approval_id]  (yalnızca olay günlüğünde plan onayı istendiğinde veya Approval panelde ID varken)",
         "/reject [approval_id] [reason]",
         "/cancel [approval_id] [reason]",
+        "/close [reason]",
         "/projects",
         "/history <proje>",
         "/project use <id>",
+        "/scan",
         "/help",
     ]
 )
@@ -74,38 +107,60 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
             return CommandOutcome(ok=False, message="Usage: /task <metin>", level="error")
         task_text = " ".join(command.args)
         state = context.current_state or {}
+        thread_id = _ensure_thread_id(state)
         active_project = await ProjectManager().active_project()
+        project_id = active_project.project_id if active_project else state.get("project_id")
         await context.event_bus.publish(
             "task.received",
             new_event(
                 "task.received",
-                payload={"task_description": task_text},
-                project_id=(active_project.project_id if active_project else state.get("project_id")),
-                thread_id=state.get("current_thread_id"),
-                correlation_id=(active_project.project_id if active_project else state.get("project_id")),
+                payload={"task_description": task_text, "task_id": thread_id},
+                project_id=project_id,
+                thread_id=thread_id,
+                correlation_id=project_id,
             ).model_dump(),
         )
-        return CommandOutcome(ok=True, message=f"Task queued: {task_text}")
+        return CommandOutcome(ok=True, message=f"Task queued [{thread_id}]: {task_text}")
     if command.name == "apply":
         state = context.current_state or {}
+        thread_id = _ensure_thread_id(state)
         active_project = await ProjectManager().active_project()
-        task_text = " ".join(command.args).strip() or state.get("task_description") or "apply current draft"
+        apply_note = " ".join(command.args).strip()
+        task_text = apply_note or state.get("task_description") or "apply current draft"
+        project_id = active_project.project_id if active_project else state.get("project_id")
         await context.event_bus.publish(
             "task.received",
             new_event(
                 "task.received",
-                payload={"task_description": task_text, "execution_requested": True},
-                project_id=(active_project.project_id if active_project else state.get("project_id")),
-                thread_id=state.get("current_thread_id"),
-                correlation_id=(active_project.project_id if active_project else state.get("project_id")),
+                payload={
+                    "task_description": task_text,
+                    "execution_requested": True,
+                    "task_id": thread_id,
+                    "suppress_user_turn": not bool(apply_note),
+                },
+                project_id=project_id,
+                thread_id=thread_id,
+                correlation_id=project_id,
             ).model_dump(),
         )
-        return CommandOutcome(ok=True, message="Current draft sent for execution review.")
+        return CommandOutcome(ok=True, message=f"Current draft sent for execution review [{thread_id}].")
     if command.name == "status":
         return CommandOutcome(
             ok=True,
             message=format_status_summary(context.current_state, active_approval=context.active_approval),
         )
+    if command.name == "scan":
+        try:
+            results = await AIScanner().scan_all()
+            lines = ["AI Provider Durumu:"]
+            for result in results:
+                status = "✓" if result.available else "✗"
+                lines.append(f"{status} {result.provider}  {result.model_name}  {result.detail}")
+            return CommandOutcome(ok=True, message="\n".join(lines))
+        except Exception as exc:
+            return CommandOutcome(ok=False, message=f"AI Provider Durumu alinamadi: {exc}", level="error")
+    if command.name == "close":
+        return await _close_current_task(command, context, status="closed")
     if command.name == "projects":
         return await _handle_projects_command()
     if command.name == "history":
@@ -159,6 +214,8 @@ async def _handle_approval_command(command: ParsedCommand, context: CommandConte
     if approval_id is None and active is not None:
         approval_id = active.get("approval_id")
     if not approval_id:
+        if command.name in {"reject", "cancel"}:
+            return await _close_current_task(command, context, status={"reject": "rejected", "cancel": "cancelled"}[command.name])
         return CommandOutcome(
             ok=False,
             message=(
@@ -207,3 +264,44 @@ async def _handle_approval_command(command: ParsedCommand, context: CommandConte
         ).model_dump(),
     )
     return CommandOutcome(ok=True, message=f"{decision} event sent for approval {approval_id}")
+
+
+async def _close_current_task(command: ParsedCommand, context: CommandContext, *, status: str) -> CommandOutcome:
+    state = context.current_state or {}
+    project_id = state.get("project_id")
+    thread_id = state.get("planning_thread_id") or state.get("current_thread_id")
+    if not project_id or not thread_id:
+        return CommandOutcome(ok=False, message="Kapatilacak aktif task/thread bulunamadi.", level="warning")
+
+    reason = " ".join(command.args).strip()
+    updates = {
+        "planning_status": status,
+        "sprint_status": status,
+        "awaiting_approval": False,
+        "approval_type": "",
+        "active_approval_id": None,
+        "approval_request": None,
+        "execution_requested": False,
+        "suppress_user_turn": False,
+        "worker_queue": [],
+        "active_assignment": None,
+        "active_assignments": {},
+        "manager_reply": f"Task {status}." + (f" Reason: {reason}" if reason else ""),
+        "last_closed_thread_id": thread_id,
+    }
+    state.update(updates)
+    if hasattr(context.state_manager, "update"):
+        await context.state_manager.update(project_id, updates)
+    if hasattr(context.state_manager, "flush_to_disk"):
+        await context.state_manager.flush_to_disk()
+    await context.event_bus.publish(
+        "task.closed",
+        new_event(
+            "task.closed",
+            payload={"project_id": project_id, "thread_id": thread_id, "status": status, "reason": reason},
+            project_id=project_id,
+            thread_id=thread_id,
+            correlation_id=project_id,
+        ).model_dump(),
+    )
+    return CommandOutcome(ok=True, message=f"Task {status}: {thread_id}")

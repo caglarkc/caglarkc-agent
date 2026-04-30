@@ -11,8 +11,10 @@ from src.core.manager_planning import ManagerPlanningService
 class FakeModel:
     def __init__(self, responses: list[str]) -> None:
         self._responses = list(responses)
+        self.calls = []
 
     async def ainvoke(self, messages):  # noqa: ANN001
+        self.calls.append(messages)
         return SimpleNamespace(content=self._responses.pop(0))
 
 
@@ -72,3 +74,80 @@ async def test_manager_planning_returns_clarification_when_json_stays_invalid() 
     assert result.needs_clarification is True
     assert result.draft_plan is None
     assert result.error_message == "manager_response_invalid"
+
+
+@pytest.mark.asyncio
+async def test_manager_planning_does_not_let_model_escalate_to_apply() -> None:
+    service = ManagerPlanningService(
+        settings=Settings(
+            manager_use_gemini=True,
+            gemini_api_key="test-key",
+            manager_model="gemini-test",
+        ),
+        model=FakeModel(
+            [
+                (
+                    '{"reply_text":"Plan hazir.","needs_clarification":false,'
+                    '"execution_intent":"apply","plan":{"summary":"Build CLI","sprint_type":"feature",'
+                    '"files":[{"path":"main.py","description":"Create CLI.","dependencies":[],'
+                    '"task_type":"feature_entry"}]}}'
+                ),
+            ]
+        ),
+    )
+
+    result = await service.process_turn(
+        user_message="CLI hesap makinesi icin plan yap, henuz kod yazma",
+        conversation_history=[],
+        existing_draft=None,
+        explicit_execution=False,
+    )
+
+    assert result.execution_intent.mode == "discuss"
+    assert result.draft_plan is not None
+
+
+@pytest.mark.asyncio
+async def test_manager_planning_sends_history_and_existing_draft_to_gemini() -> None:
+    model = FakeModel(
+        [
+            (
+                '{"reply_text":"Devam ediyorum.","needs_clarification":false,'
+                '"execution_intent":"discuss","plan":null}'
+            ),
+        ]
+    )
+    service = ManagerPlanningService(
+        settings=Settings(
+            manager_use_gemini=True,
+            gemini_api_key="test-key",
+            manager_model="gemini-test",
+        ),
+        model=model,
+    )
+
+    await service.process_turn(
+        user_message="renkleri koyulastir",
+        conversation_history=[
+            {"role": "user", "content": "landing page yap"},
+            {"role": "manager", "content": "Taslak hazir."},
+        ],
+        existing_draft={
+            "summary": "landing page yap",
+            "sprint_type": "feature",
+            "files": [
+                {
+                    "path": "app.py",
+                    "description": "Create app entrypoint.",
+                    "dependencies": [],
+                    "task_type": "feature_entry",
+                }
+            ],
+        },
+    )
+
+    prompt_payload = model.calls[0][1].content
+    assert "landing page yap" in prompt_payload
+    assert "Taslak hazir." in prompt_payload
+    assert "app.py" in prompt_payload
+    assert "renkleri koyulastir" in prompt_payload

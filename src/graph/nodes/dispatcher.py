@@ -78,7 +78,7 @@ async def dispatcher_node(state: dict) -> dict:
             "worker_status": cleared_workers,
             "active_assignment": None,
             "sprint_status": "paused_replan",
-            "messages": [*state.get("messages", []), "dispatcher paused active work for scope change"],
+            "messages": ["dispatcher paused active work for scope change"],
         }
         async with StateTransaction(project_id) as transaction:
             persisted = transaction.state
@@ -105,17 +105,17 @@ async def dispatcher_node(state: dict) -> dict:
             )
             return {
                 "stalled_since": stalled_at,
-                "messages": [*state.get("messages", []), "dispatcher detected stalled active assignment"],
+                "messages": ["dispatcher detected stalled active assignment"],
             }
         return {
-            "messages": [*state.get("messages", []), "dispatcher detected active assignment"],
+            "messages": ["dispatcher detected active assignment"],
         }
 
     if _detect_cycle(dependencies):
         return {
             "sprint_status": "fail",
-            "errors": [*state.get("errors", []), {"type": "dependency_cycle", "dependencies": dependencies}],
-            "messages": [*state.get("messages", []), "dispatcher detected dependency cycle"],
+            "errors": [{"type": "dependency_cycle", "dependencies": dependencies}],
+            "messages": ["dispatcher detected dependency cycle"],
         }
 
     idle_worker = next((worker_id for worker_id, status in worker_status.items() if status == "idle"), None)
@@ -138,10 +138,10 @@ async def dispatcher_node(state: dict) -> dict:
             )
             return {
                 "stalled_since": stalled_at,
-                "messages": [*state.get("messages", []), "dispatcher emitted stalled due to heartbeat silence"],
+                "messages": ["dispatcher emitted stalled due to heartbeat silence"],
             }
         return {
-            "messages": [*state.get("messages", []), "dispatcher found no idle worker"],
+            "messages": ["dispatcher found no idle worker"],
         }
 
     selected_index: int | None = None
@@ -175,9 +175,8 @@ async def dispatcher_node(state: dict) -> dict:
     if selected_index is None or selected_assignment is None:
         pending = [entry["assignment"]["target_file"] for entry in queue if entry.get("status") == "planned"]
         return {
-            "messages": [*state.get("messages", []), "dispatcher found no ready assignment"],
+            "messages": ["dispatcher found no ready assignment"],
             "errors": [
-                *state.get("errors", []),
                 {
                     "type": "dispatch_blocked",
                     "pending_files": pending,
@@ -233,7 +232,7 @@ async def dispatcher_node(state: dict) -> dict:
         "last_heartbeat_at": heartbeat_at,
         "last_activity_at": heartbeat_at,
         "stalled_since": None,
-        "messages": [*state.get("messages", []), f"dispatcher assigned {target_file} to {idle_worker}"],
+        "messages": [f"dispatcher assigned {target_file} to {idle_worker}"],
     }
     async with StateTransaction(project_id) as transaction:
         persisted = transaction.state

@@ -68,3 +68,27 @@ async def test_planner_node_builds_queue_when_execution_is_requested(
         "static/styles.css",
     ]
     assert result["dependencies"]["templates/index.html"] == ["app.py"]
+
+
+@pytest.mark.asyncio
+async def test_planner_node_does_not_duplicate_user_turn_on_plain_apply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_paths(monkeypatch, tmp_path)
+    await EventBus().reset()
+    state = build_initial_state(
+        project_name="demo-project",
+        task_description="site kur",
+        project_id="project-3",
+        current_thread_id="thread-3",
+    )
+    first = await planner_node(state)
+    state.update(first)
+    state["execution_requested"] = True
+    state["suppress_user_turn"] = True
+
+    result = await planner_node(state)
+
+    user_turns = [turn for turn in result["conversation_history"] if turn.get("role") == "user"]
+    assert [turn["content"] for turn in user_turns] == ["site kur"]

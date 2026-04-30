@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypedDict
+import operator
+from typing import Annotated, Any, Literal, TypedDict
 from uuid import uuid4
 
 
@@ -19,7 +20,7 @@ class QueueEntry(TypedDict, total=False):
 class OrchestratorState(TypedDict, total=False):
     project_id: str
     project_name: str
-    task_description: str
+    task_description: Annotated[str, lambda a, b: b]
     worker_queue: list[QueueEntry]
     dependencies: dict[str, list[str]]
     file_registry: dict[str, FileStatus]
@@ -38,20 +39,21 @@ class OrchestratorState(TypedDict, total=False):
     draft_plan: dict[str, Any] | None
     conversation_history: list[dict[str, Any]]
     planning_status: str
-    execution_requested: bool
-    planning_thread_id: str | None
+    execution_requested: Annotated[bool, lambda a, b: b]
+    suppress_user_turn: Annotated[bool, lambda a, b: b]
+    planning_thread_id: Annotated[str | None, lambda a, b: b]
     scope_changed: bool
-    errors: list[dict[str, Any]]
-    messages: list[str]
+    errors: Annotated[list[dict[str, Any]], operator.add]
+    messages: Annotated[list[str], operator.add]
     active_assignment: dict[str, Any] | None
     active_assignments: dict[str, dict[str, Any]]
     approval_request: dict[str, Any] | None
     validation_issues: list[dict[str, Any]]
     revision_tasks: list[dict[str, Any]]
-    current_thread_id: str
+    current_thread_id: Annotated[str, lambda a, b: b]
     contract_completed: bool
     plan_version: int
-    blocked_reasons: list[dict[str, Any]]
+    blocked_reasons: Annotated[list[dict[str, Any]], lambda a, b: b]
     reservation_conflicts: list[dict[str, Any]]
     last_scope_change: dict[str, Any] | None
     last_heartbeat_at: str | None
@@ -90,6 +92,7 @@ def build_initial_state(
         "conversation_history": [],
         "planning_status": "idle",
         "execution_requested": False,
+        "suppress_user_turn": False,
         "planning_thread_id": current_thread_id,
         "scope_changed": False,
         "errors": [],
