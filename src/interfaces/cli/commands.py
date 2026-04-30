@@ -64,7 +64,7 @@ HELP_TEXT = "\n".join(
         "/close [reason]",
         "/projects",
         "/history <proje>",
-        "/project use <id>",
+        "/project use <id veya proje adi>",
         "/scan",
         "/help",
     ]
@@ -338,12 +338,14 @@ async def _handle_history_command(command: ParsedCommand) -> CommandOutcome:
 
 
 async def _handle_project_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
-    if len(command.args) != 2 or command.args[0] != "use":
-        return CommandOutcome(ok=False, message="Usage: /project use <id>", level="error")
+    if len(command.args) < 2 or command.args[0] != "use":
+        return CommandOutcome(ok=False, message="Usage: /project use <id veya proje adi>", level="error")
     manager = ProjectManager()
-    project = await manager.select_active_project(command.args[1])
+    project_ref = " ".join(command.args[1:])
+    found = await manager.get_project(project_ref)
+    project = await manager.select_active_project(found.project_id) if found is not None else None
     if project is None:
-        return CommandOutcome(ok=False, message=f"Project not found: {command.args[1]}", level="warning")
+        return CommandOutcome(ok=False, message=f"Project not found: {project_ref}", level="warning")
     if context.current_state is not None:
         context.current_state["project_id"] = project.project_id
         context.current_state["project_name"] = project.name
