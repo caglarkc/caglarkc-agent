@@ -49,14 +49,7 @@ def _elapsed_ms(started_at: float) -> int:
 
 class AIScanner:
     async def scan_all(self) -> list[ProviderResult]:
-        return list(
-            await asyncio.gather(
-                self.scan_ollama(),
-                self.scan_gemini(),
-                self.scan_openrouter_primary(),
-                self.scan_openrouter_secondary(),
-            )
-        )
+        return list(await asyncio.gather(self.scan_gemini()))
 
     async def scan_ollama(self) -> ProviderResult:
         settings = get_settings()
@@ -130,7 +123,7 @@ class AIScanner:
 
     async def scan_gemini(self) -> ProviderResult:
         settings = get_settings()
-        model_name = settings.manager_model or settings.gemini_model
+        model_name = settings.gemini_model
         if not settings.gemini_api_key:
             return ProviderResult(
                 provider="gemini",

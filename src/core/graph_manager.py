@@ -114,6 +114,8 @@ class GraphManager:
         task_description = payload.get("task_description")
         execution_requested = bool(payload.get("execution_requested"))
         suppress_user_turn = bool(payload.get("suppress_user_turn"))
+        scope_changed = bool(payload.get("scope_changed"))
+        scope_change_reason = str(payload.get("scope_change_reason") or "").strip()
         if isinstance(task_description, str):
             task_description = task_description.strip()
         else:
@@ -208,6 +210,8 @@ class GraphManager:
                     "task_description": task_description or existing_state.get("task_description", ""),
                     "execution_requested": execution_requested,
                     "suppress_user_turn": suppress_user_turn,
+                    "scope_changed": scope_changed or bool(existing_state.get("scope_changed")),
+                    "scope_change_reason": scope_change_reason or existing_state.get("scope_change_reason", ""),
                     "planning_thread_id": thread_id,
                     "current_thread_id": thread_id,
                 }
@@ -222,6 +226,8 @@ class GraphManager:
                 )
                 initial["execution_requested"] = execution_requested
                 initial["suppress_user_turn"] = suppress_user_turn
+                initial["scope_changed"] = scope_changed
+                initial["scope_change_reason"] = scope_change_reason
                 initial["planning_thread_id"] = thread_id
                 await self.graph.ainvoke(initial, config=config)
             snapshot = await self.graph.aget_state(config)

@@ -7,10 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from langchain_community.chat_models import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
 
 from src.config.settings import Settings, get_settings
 from src.core.contracts import DispatchAssignment
@@ -141,27 +139,6 @@ def _related_file_snapshots(state: dict, target_file: str) -> str:
 
 
 def _worker_model_config(worker_id: str, settings: Settings) -> WorkerModelConfig:
-    if worker_id == "worker_a":
-        return WorkerModelConfig(
-            provider="openrouter_primary",
-            model_name=settings.openrouter_model,
-            auth_available=bool(settings.openrouter_api_key_primary),
-            missing_auth_message="OPENROUTER_API_KEY_PRIMARY is missing",
-        )
-    if worker_id == "worker_b":
-        return WorkerModelConfig(
-            provider="openrouter_secondary",
-            model_name=settings.openrouter_model_secondary,
-            auth_available=bool(settings.openrouter_api_key_secondary),
-            missing_auth_message="OPENROUTER_API_KEY_SECONDARY is missing",
-        )
-    if worker_id == "worker_c":
-        return WorkerModelConfig(
-            provider="openrouter_primary",
-            model_name=settings.openrouter_model,
-            auth_available=bool(settings.openrouter_api_key_primary),
-            missing_auth_message="OPENROUTER_API_KEY_PRIMARY is missing",
-        )
     if settings.gemini_api_key:
         return WorkerModelConfig(provider="gemini", model_name=settings.gemini_model)
     return WorkerModelConfig(
@@ -173,36 +150,6 @@ def _worker_model_config(worker_id: str, settings: Settings) -> WorkerModelConfi
 
 
 def _chat_model_for(config: WorkerModelConfig, settings: Settings):
-    if config.provider == "ollama":
-        return ChatOllama(
-            model=config.model_name,
-            base_url=settings.ollama_base_url,
-            temperature=0,
-        )
-    if config.provider == "openrouter_primary":
-        return ChatOpenAI(
-            model=config.model_name,
-            api_key=settings.openrouter_api_key_primary,
-            base_url=settings.openrouter_base_url,
-            temperature=0,
-            timeout=settings.http_timeout_seconds,
-            default_headers={
-                "HTTP-Referer": "https://local.phase1.worker",
-                "X-Title": "AI Development Team Orchestrator Worker",
-            },
-        )
-    if config.provider == "openrouter_secondary":
-        return ChatOpenAI(
-            model=config.model_name,
-            api_key=settings.openrouter_api_key_secondary,
-            base_url=settings.openrouter_base_url,
-            temperature=0,
-            timeout=settings.http_timeout_seconds,
-            default_headers={
-                "HTTP-Referer": "https://local.phase1.worker",
-                "X-Title": "AI Development Team Orchestrator Worker",
-            },
-        )
     return ChatGoogleGenerativeAI(
         model=config.model_name,
         google_api_key=settings.gemini_api_key,
@@ -330,58 +277,34 @@ def _normalize_generated_artifact(content: str, target_file: str) -> str:
 
 
 async def _direct_chat_response(config: WorkerModelConfig, settings: Settings, system_prompt: str, user_prompt: str) -> str | None:
-    if config.provider == "ollama":
+    if config.provider == "gemini":
+        if not settings.gemini_api_key:
+            return None
         async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
             response = await client.post(
-                f"{settings.ollama_base_url.rstrip('/')}/api/chat",
+                f"{settings.gemini_base_url.rstrip('/')}/v1beta/models/{config.model_name}:generateContent",
+                params={"key": settings.gemini_api_key},
                 json={
-                    "model": config.model_name,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{"text": user_prompt}],
+                        }
                     ],
-                    "stream": False,
-                    "options": {"temperature": 0},
+                    "generationConfig": {"temperature": 0},
                 },
             )
             response.raise_for_status()
             payload = response.json()
-        return (payload.get("message") or {}).get("content")
-    if config.provider in {"openrouter_primary", "openrouter_secondary"}:
-        api_key = settings.openrouter_api_key_primary if config.provider == "openrouter_primary" else settings.openrouter_api_key_secondary
-        async with httpx.AsyncClient(timeout=settings.http_timeout_seconds) as client:
-            response = await client.post(
-                f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "HTTP-Referer": "https://local.phase1.worker",
-                    "X-Title": "AI Development Team Orchestrator Worker",
-                },
-                json={
-                    "model": config.model_name,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-        choices = payload.get("choices") or []
-        if not choices or not isinstance(choices[0], dict):
-            return ""
-        return ((choices[0].get("message") or {}).get("content") or "")
+        parts = (((payload.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+        return "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
     return None
 
 
 def _fallback_chain(settings: Settings) -> list[WorkerModelConfig]:
-    """Returns providers in priority order while local Ollama is disabled."""
+    """Returns the worker provider chain. Workers are Gemini-only."""
     chain = []
-    if settings.openrouter_api_key_primary:
-        chain.append(WorkerModelConfig(provider="openrouter_primary", model_name=settings.openrouter_model))
-    if settings.openrouter_api_key_secondary:
-        chain.append(WorkerModelConfig(provider="openrouter_secondary", model_name=settings.openrouter_model_secondary))
     if settings.gemini_api_key:
         chain.append(WorkerModelConfig(provider="gemini", model_name=settings.gemini_model))
     return chain

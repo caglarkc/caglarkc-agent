@@ -40,9 +40,9 @@ class Settings(BaseSettings):
         default="https://generativelanguage.googleapis.com",
         alias="GEMINI_BASE_URL",
     )
-    gemini_model: str = Field(default="gemini-2.0-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-flash-lite-latest", alias="GEMINI_MODEL")
     manager_use_gemini: bool = Field(default=True, alias="MANAGER_USE_GEMINI")
-    manager_model: str = Field(default="gemini-2.0-flash", alias="MANAGER_MODEL")
+    manager_model: str = Field(default="gemini-flash-lite-latest", alias="MANAGER_MODEL")
     manager_max_history_turns: int = Field(default=12, alias="MANAGER_MAX_HISTORY_TURNS")
     use_legacy_planner: bool = Field(default=False, alias="USE_LEGACY_PLANNER")
 

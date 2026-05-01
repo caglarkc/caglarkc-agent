@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import shlex
 from typing import Any
 from uuid import uuid4
 
@@ -56,6 +57,7 @@ HELP_TEXT = "\n".join(
         "/resume [project_id veya proje adi]",
         "/r <mesaj>",
         "/plan [project_id veya proje adi]",
+        "/changePlan <degisiklik>",
         "/start [project_id veya proje adi]",
         "/apply [istege bagli not]",
         "/status",
@@ -103,7 +105,10 @@ def parse_command(raw: str) -> ParsedCommand:
         return ParsedCommand(name="empty", args=[], raw=raw)
     if not text.startswith("/"):
         return ParsedCommand(name="invalid", args=[text], raw=raw)
-    parts = text.split()
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = text.split()
     return ParsedCommand(name=parts[0][1:].lower(), args=parts[1:], raw=raw)
 
 
@@ -123,6 +128,8 @@ async def execute_command(raw: str, context: CommandContext) -> CommandOutcome:
         return await _publish_chat_message(command, context, command_name="/r")
     if command.name == "plan":
         return await _handle_plan_command(command, context)
+    if command.name == "changeplan":
+        return await _handle_change_plan_command(command, context)
     if command.name == "start":
         return await _handle_start_command(command, context)
     if command.name == "task":
@@ -361,6 +368,37 @@ async def _handle_plan_command(command: ParsedCommand, context: CommandContext) 
         ).model_dump(),
     )
     return CommandOutcome(ok=True, message=f"Planning requested [{thread_id}]: {project.project_id} | {project.name}")
+
+
+async def _handle_change_plan_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:
+    change_text = " ".join(command.args).strip()
+    if not change_text:
+        return CommandOutcome(ok=False, message="Usage: /changePlan <degisiklik>", level="error")
+    try:
+        project, state = await _select_project_state(context)
+    except LookupError:
+        return CommandOutcome(ok=False, message="Project not found: active/latest", level="warning")
+    thread_id = _ensure_thread_id(state)
+    state["scope_changed"] = True
+    state["scope_change_reason"] = change_text
+    await _persist_state(context, project.project_id, state)
+    await context.event_bus.publish(
+        "task.received",
+        new_event(
+            "task.received",
+            payload={
+                "task_description": change_text,
+                "execution_requested": True,
+                "task_id": thread_id,
+                "scope_changed": True,
+                "scope_change_reason": change_text,
+            },
+            project_id=project.project_id,
+            thread_id=thread_id,
+            correlation_id=project.project_id,
+        ).model_dump(),
+    )
+    return CommandOutcome(ok=True, message=f"Plan change requested [{thread_id}]: {project.project_id} | {project.name}")
 
 
 async def _handle_start_command(command: ParsedCommand, context: CommandContext) -> CommandOutcome:

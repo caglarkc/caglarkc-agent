@@ -84,49 +84,44 @@ def _review_prompt(state: dict, file_snapshots: list[dict[str, str]]) -> str:
     return _clip(json.dumps(payload, ensure_ascii=False, indent=2), limit=MAX_REVIEW_CHARS)
 
 
-async def _openrouter_review(prompt: str, *, provider: str, model_name: str, api_key: str) -> dict[str, Any]:
+async def _gemini_review(prompt: str, *, model_name: str, api_key: str) -> dict[str, Any]:
     settings = get_settings()
     if not api_key:
-        return {"approved": True, "summary": f"{provider} final review skipped: API key missing.", "issues": [], "skipped": True}
+        return {"approved": True, "summary": "Gemini final review skipped: API key missing.", "issues": [], "skipped": True}
     async with httpx.AsyncClient(timeout=settings.final_review_timeout_seconds) as client:
         response = await client.post(
-            f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "https://local.phase1.final-review",
-                "X-Title": "AI Development Team Orchestrator Final Review",
-            },
+            f"{settings.gemini_base_url.rstrip('/')}/v1beta/models/{model_name}:generateContent",
+            params={"key": api_key},
             json={
-                "model": model_name,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a strict final code auditor. Inspect generated files and executor output. "
-                            "Return only JSON with keys: approved:boolean, summary:string, issues:array. "
-                            "Each issue must include target_file, code, message, severity. "
-                            "Approve only when the implementation is coherent, runnable, and matches the user's request."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0,
+                "systemInstruction": {
+                    "parts": [
+                        {
+                            "text": (
+                                "You are a strict final code auditor. Inspect generated files and executor output. "
+                                "Return only JSON with keys: approved:boolean, summary:string, issues:array. "
+                                "Each issue must include target_file, code, message, severity. "
+                                "Approve only when the implementation is coherent, runnable, and matches the user's request."
+                            )
+                        }
+                    ]
+                },
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0},
             },
         )
         response.raise_for_status()
-        choices = response.json().get("choices") or []
-        content = ""
-        if choices and isinstance(choices[0], dict):
-            content = ((choices[0].get("message") or {}).get("content") or "")
+        payload = response.json()
+        parts = (((payload.get("candidates") or [{}])[0].get("content") or {}).get("parts") or [])
+        content = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
     payload = _extract_json(content)
     if not payload:
         return {
             "approved": True,
-            "summary": f"{provider} final review returned non-JSON output.",
+            "summary": "Gemini final review returned non-JSON output.",
             "issues": [],
             "raw": _clip(content, limit=1_500),
         }
-    payload.setdefault("provider", provider)
+    payload.setdefault("provider", "gemini")
     payload.setdefault("model", model_name)
     return payload
 
@@ -165,45 +160,23 @@ async def run_final_project_review(state: dict) -> dict[str, Any]:
     file_snapshots = await _read_generated_files(project_root, sorted(state.get("file_registry", {}).keys()))
     prompt = _review_prompt(state, file_snapshots)
     try:
-        primary_review = await _openrouter_review(
+        gemini_review = await _gemini_review(
             prompt,
-            provider="openrouter_primary",
-            model_name=settings.openrouter_model,
-            api_key=settings.openrouter_api_key_primary,
+            model_name=settings.manager_model or settings.gemini_model,
+            api_key=settings.gemini_api_key,
         )
     except Exception as exc:  # noqa: BLE001
-        primary_review = {
+        gemini_review = {
             "approved": True,
-            "summary": f"OpenRouter primary final review unavailable: {_safe_error(exc)}",
+            "summary": f"Gemini final review unavailable: {_safe_error(exc)}",
             "issues": [],
             "skipped": True,
         }
-    try:
-        secondary_review = await _openrouter_review(
-            prompt,
-            provider="openrouter_secondary",
-            model_name=settings.openrouter_model_secondary,
-            api_key=settings.openrouter_api_key_secondary,
-        )
-    except Exception as exc:  # noqa: BLE001
-        secondary_review = {
-            "approved": bool(primary_review.get("approved", True)),
-            "summary": f"OpenRouter secondary final review unavailable: {_safe_error(exc)}",
-            "issues": [],
-            "skipped": True,
-        }
-    primary_issues = _issues_from_review(primary_review, source="openrouter_primary")
-    secondary_issues = _issues_from_review(secondary_review, source="openrouter_secondary")
-    approved = (
-        bool(primary_review.get("approved", True))
-        and bool(secondary_review.get("approved", True))
-        and not primary_issues
-        and not secondary_issues
-    )
+    issues = _issues_from_review(gemini_review, source="gemini")
+    approved = bool(gemini_review.get("approved", True)) and not issues
     return {
         "approved": approved,
-        "summary": f"primary={primary_review.get('summary', '')} | secondary={secondary_review.get('summary', '')}",
-        "issues": [*primary_issues, *secondary_issues],
-        "primary_review": primary_review,
-        "secondary_review": secondary_review,
+        "summary": f"gemini={gemini_review.get('summary', '')}",
+        "issues": issues,
+        "gemini_review": gemini_review,
     }
