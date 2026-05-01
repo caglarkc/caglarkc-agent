@@ -179,6 +179,16 @@ def _can_use_safe_frontend_template(target_file: str, task_description: str) -> 
     )
 
 
+def _task_text_from_state(state: dict) -> str:
+    history = state.get("conversation_history", [])
+    history_text = " ".join(
+        str(turn.get("content", ""))
+        for turn in history
+        if isinstance(turn, dict) and turn.get("role") == "user"
+    )
+    return " ".join([str(state.get("task_description", "")), history_text]).strip()
+
+
 def _compact_text(value: Any, *, max_chars: int = CONTEXT_MAX_CHARS) -> str:
     text = "" if value is None else str(value)
     text = " ".join(text.split())
@@ -554,10 +564,7 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
                     )
                     content = _normalize_generated_artifact(repaired, assignment.target_file)
                 except InvalidGeneratedArtifactError:
-                    content = _render_stub_file_content(
-                        assignment.target_file,
-                        task_description=state.get("task_description", ""),
-                    )
+                    content = _render_stub_file_content(assignment.target_file, task_description=_task_text_from_state(state))
                     used_stub = True
                     fallback_reason = "Gemini returned planner JSON twice; used safe frontend template"
             if assignment.target_file.endswith(".html"):
@@ -577,8 +584,9 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
             continue
 
     if last_error is not None:
-        if _can_use_safe_frontend_template(assignment.target_file, state.get("task_description", "")):
-            content = _render_stub_file_content(assignment.target_file, task_description=state.get("task_description", ""))
+        state_task_text = _task_text_from_state(state)
+        if _can_use_safe_frontend_template(assignment.target_file, state_task_text):
+            content = _render_stub_file_content(assignment.target_file, task_description=state_task_text)
             if assignment.target_file.endswith(".html"):
                 content = _align_html_asset_links(content, state)
             return GeneratedFileContent(
