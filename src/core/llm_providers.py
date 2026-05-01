@@ -171,6 +171,14 @@ def _render_stub_file_content(target_file: str, *, task_description: str = "") -
     return f"# generated fallback for {target_file}\n"
 
 
+def _can_use_safe_frontend_template(target_file: str, task_description: str) -> bool:
+    lowered = task_description.lower()
+    return (
+        Path(target_file).suffix.lower() in {".html", ".css", ".js"}
+        and ("borç" in lowered or "borc" in lowered or "debt" in lowered)
+    )
+
+
 def _compact_text(value: Any, *, max_chars: int = CONTEXT_MAX_CHARS) -> str:
     text = "" if value is None else str(value)
     text = " ".join(text.split())
@@ -561,5 +569,16 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
             continue
 
     if last_error is not None:
+        if _can_use_safe_frontend_template(assignment.target_file, state.get("task_description", "")):
+            content = _render_stub_file_content(assignment.target_file, task_description=state.get("task_description", ""))
+            if assignment.target_file.endswith(".html"):
+                content = _align_html_asset_links(content, state)
+            return GeneratedFileContent(
+                content=content,
+                provider=primary_config.provider,
+                model_name=primary_config.model_name,
+                used_stub=True,
+                fallback_reason=f"Gemini unavailable for frontend artifact: {type(last_error).__name__}",
+            )
         raise last_error
     raise RuntimeError("all Gemini worker providers failed")
