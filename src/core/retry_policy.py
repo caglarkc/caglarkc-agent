@@ -47,10 +47,15 @@ class RetryPolicy:
 def classify_error(exc: Exception) -> ErrorClassification:
     response = getattr(exc, "response", None)
     status_code = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
+    exc_name = type(exc).__name__
     if status_code in {401, 403}:
         return ErrorClassification(retryable=False, reason="authentication_or_authorization_error")
     if status_code == 429:
         return ErrorClassification(retryable=True, reason="rate_limited")
+    if exc_name in {"DeadlineExceeded", "ServiceUnavailable", "InternalServerError", "TooManyRequests", "ResourceExhausted"}:
+        return ErrorClassification(retryable=True, reason="transient_provider_error")
+    if not str(exc).strip() and exc_name not in {"ValueError", "ValidationError", "ContractValidationError"}:
+        return ErrorClassification(retryable=True, reason="empty_provider_error")
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return ErrorClassification(retryable=True, reason="timeout")
     if isinstance(exc, (ValidationError, ValueError, PermissionError)):

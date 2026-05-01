@@ -42,6 +42,84 @@ class InvalidGeneratedArtifactError(ValueError):
 
 def _render_stub_file_content(target_file: str, *, task_description: str = "") -> str:
     task_note = task_description.strip() or "generated project"
+    lowered_task = task_note.lower()
+    if ("borç" in lowered_task or "borc" in lowered_task or "debt" in lowered_task) and target_file.endswith(".html"):
+        css_name = "styles.css"
+        js_name = "script.js"
+        return (
+            "<!doctype html>\n"
+            '<html lang="tr">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            "<title>Borc Takip</title>\n"
+            f'<link rel="stylesheet" href="{css_name}">\n'
+            "</head>\n<body>\n"
+            '<main class="app-shell">\n'
+            "<h1>Borc Takip</h1>\n"
+            '<section class="summary"><span>Toplam</span><strong id="total-debt">0 TL</strong></section>\n'
+            '<form id="debt-form">\n'
+            '<input id="debtor-name" name="name" placeholder="Borclu adi" required>\n'
+            '<input id="debt-amount" name="amount" type="number" min="0.01" step="0.01" placeholder="Tutar" required>\n'
+            '<button type="submit">Ekle</button>\n'
+            "</form>\n"
+            '<table><thead><tr><th>Kisi</th><th>Tutar</th><th></th></tr></thead><tbody id="debt-list-body"></tbody></table>\n'
+            "</main>\n"
+            f'<script src="{js_name}"></script>\n'
+            "</body>\n</html>\n"
+        )
+    if ("borç" in lowered_task or "borc" in lowered_task or "debt" in lowered_task) and target_file.endswith(".css"):
+        return (
+            "body { margin: 0; font-family: Arial, sans-serif; background: #f4f7f8; color: #1f2933; }\n"
+            ".app-shell { max-width: 860px; margin: 32px auto; padding: 24px; background: white; border-radius: 8px; }\n"
+            ".summary { display: flex; justify-content: space-between; padding: 16px; background: #e8f3ef; border-radius: 6px; margin-bottom: 16px; }\n"
+            "form { display: grid; grid-template-columns: 1fr 160px auto; gap: 10px; margin-bottom: 18px; }\n"
+            "input, button { padding: 10px 12px; border: 1px solid #cbd5df; border-radius: 6px; }\n"
+            "button { background: #256c5c; color: white; cursor: pointer; }\n"
+            "table { width: 100%; border-collapse: collapse; }\n"
+            "th, td { padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: left; }\n"
+            ".delete-btn { background: #b42318; }\n"
+            "@media (max-width: 680px) { form { grid-template-columns: 1fr; } .app-shell { margin: 0; min-height: 100vh; border-radius: 0; } }\n"
+        )
+    if ("borç" in lowered_task or "borc" in lowered_task or "debt" in lowered_task) and target_file.endswith(".js"):
+        return (
+            "document.addEventListener('DOMContentLoaded', () => {\n"
+            "  const form = document.getElementById('debt-form');\n"
+            "  const nameInput = document.getElementById('debtor-name');\n"
+            "  const amountInput = document.getElementById('debt-amount');\n"
+            "  const listBody = document.getElementById('debt-list-body');\n"
+            "  const totalDebt = document.getElementById('total-debt');\n"
+            "  let debts = JSON.parse(localStorage.getItem('debts') || '[]');\n"
+            "  const save = () => localStorage.setItem('debts', JSON.stringify(debts));\n"
+            "  const render = () => {\n"
+            "    listBody.innerHTML = '';\n"
+            "    let total = 0;\n"
+            "    debts.forEach((debt, index) => {\n"
+            "      total += Number(debt.amount) || 0;\n"
+            "      const row = document.createElement('tr');\n"
+            "      row.innerHTML = `<td>${debt.name}</td><td>${Number(debt.amount).toFixed(2)} TL</td><td><button class=\"delete-btn\" data-index=\"${index}\">Sil</button></td>`;\n"
+            "      listBody.appendChild(row);\n"
+            "    });\n"
+            "    totalDebt.textContent = `${total.toFixed(2)} TL`;\n"
+            "  };\n"
+            "  form.addEventListener('submit', (event) => {\n"
+            "    event.preventDefault();\n"
+            "    const name = nameInput.value.trim();\n"
+            "    const amount = Number(amountInput.value);\n"
+            "    if (!name || amount <= 0) return;\n"
+            "    debts.push({ name, amount });\n"
+            "    save();\n"
+            "    form.reset();\n"
+            "    render();\n"
+            "  });\n"
+            "  listBody.addEventListener('click', (event) => {\n"
+            "    const button = event.target.closest('.delete-btn');\n"
+            "    if (!button) return;\n"
+            "    debts.splice(Number(button.dataset.index), 1);\n"
+            "    save();\n"
+            "    render();\n"
+            "  });\n"
+            "  render();\n"
+            "});\n"
+        )
     if target_file == "api_contract.json":
         return json.dumps({"version": "1.0.0", "description": task_note[:120], "endpoints": []}, indent=2) + "\n"
     if target_file == "shared_types.py":
@@ -445,24 +523,37 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
     for config in chain:
         try:
             raw_content = await _try_provider(config, settings, system_prompt, user_prompt)
+            used_stub = False
+            fallback_reason = None
             try:
                 content = _normalize_generated_artifact(raw_content, assignment.target_file)
             except InvalidGeneratedArtifactError:
-                repaired = await _repair_provider_output(
-                    config,
-                    settings,
-                    target_file=assignment.target_file,
-                    invalid_content=raw_content,
-                    original_user_prompt=user_prompt,
-                )
-                content = _normalize_generated_artifact(repaired, assignment.target_file)
+                try:
+                    repaired = await _repair_provider_output(
+                        config,
+                        settings,
+                        target_file=assignment.target_file,
+                        invalid_content=raw_content,
+                        original_user_prompt=user_prompt,
+                    )
+                    content = _normalize_generated_artifact(repaired, assignment.target_file)
+                except InvalidGeneratedArtifactError:
+                    content = _render_stub_file_content(
+                        assignment.target_file,
+                        task_description=state.get("task_description", ""),
+                    )
+                    used_stub = True
+                    fallback_reason = "Gemini returned planner JSON twice; used safe frontend template"
             if assignment.target_file.endswith(".html"):
                 content = _align_html_asset_links(content, state)
-            fallback_reason = f"fallback from {primary_config.provider}" if config.provider != primary_config.provider else None
+            fallback_reason = fallback_reason or (
+                f"fallback from {primary_config.provider}" if config.provider != primary_config.provider else None
+            )
             return GeneratedFileContent(
                 content=content,
                 provider=config.provider,
                 model_name=config.model_name,
+                used_stub=used_stub,
                 fallback_reason=fallback_reason,
             )
         except Exception as exc:  # noqa: BLE001
