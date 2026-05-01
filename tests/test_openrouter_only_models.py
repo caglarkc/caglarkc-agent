@@ -4,7 +4,7 @@ import pytest
 
 from src.config.settings import Settings
 from src.core import final_review
-from src.core.llm_providers import _fallback_chain, _worker_model_config
+from src.core.llm_providers import _fallback_chain, _normalize_generated_artifact, _worker_model_config
 
 
 def test_worker_model_config_uses_gemini_for_all_workers() -> None:
@@ -32,6 +32,12 @@ def test_fallback_chain_is_gemini_only_even_if_other_models_are_configured() -> 
     )
 
     assert [config.provider for config in _fallback_chain(settings)] == ["gemini"]
+
+
+def test_html_generation_trims_trailing_planner_json() -> None:
+    content = "<!doctype html><html><body>OK</body></html>\n{\"plan\": {}}\n"
+
+    assert _normalize_generated_artifact(content, "index.html") == "<!doctype html><html><body>OK</body></html>\n"
 
 
 @pytest.mark.asyncio
