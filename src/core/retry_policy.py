@@ -45,7 +45,8 @@ class RetryPolicy:
 
 
 def classify_error(exc: Exception) -> ErrorClassification:
-    status_code = getattr(exc, "status_code", None)
+    response = getattr(exc, "response", None)
+    status_code = getattr(exc, "status_code", None) or getattr(response, "status_code", None)
     if status_code in {401, 403}:
         return ErrorClassification(retryable=False, reason="authentication_or_authorization_error")
     if status_code == 429:

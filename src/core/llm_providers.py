@@ -469,4 +469,6 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
             last_error = exc
             continue
 
-    raise RuntimeError(f"all Gemini worker providers failed: {last_error}")
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("all Gemini worker providers failed")
