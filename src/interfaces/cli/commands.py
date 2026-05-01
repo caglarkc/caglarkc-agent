@@ -248,6 +248,17 @@ async def _state_for_project(context: CommandContext, project_id: str) -> dict[s
     return state if isinstance(state, dict) else {}
 
 
+async def _refresh_context_project_state(context: CommandContext, project_id: str) -> dict[str, Any]:
+    state = await _state_for_project(context, project_id)
+    if not state.get("conversation_history") and hasattr(context.state_manager, "load_from_disk"):
+        await context.state_manager.load_from_disk()
+        state = await _state_for_project(context, project_id)
+    if state:
+        context.current_state = state
+        context.active_approval = state.get("approval_request") if state.get("awaiting_approval") else None
+    return state
+
+
 async def _latest_live_state(context: CommandContext) -> dict[str, Any] | None:
     snapshot = await context.state_manager.snapshot() if hasattr(context.state_manager, "snapshot") else {}
     if not isinstance(snapshot, dict):
@@ -259,7 +270,12 @@ async def _latest_live_state(context: CommandContext) -> dict[str, Any] | None:
 
 async def _select_project_state(context: CommandContext, project_ref: str | None = None) -> tuple[Any, dict[str, Any]]:
     manager = ProjectManager()
-    project = await manager.get_project(project_ref) if project_ref else await manager.active_project()
+    if project_ref:
+        project = await manager.get_project(project_ref)
+    elif context.current_state and context.current_state.get("project_id"):
+        project = await manager.get_project(context.current_state["project_id"])
+    else:
+        project = await manager.active_project()
     if project is None and not project_ref:
         state = await _latest_live_state(context)
         if state and state.get("project_id"):
@@ -337,8 +353,9 @@ async def _publish_chat_message(command: ParsedCommand, context: CommandContext,
             project_id=project_id,
             thread_id=thread_id,
             correlation_id=project_id,
-        ).model_dump(),
-    )
+            ).model_dump(),
+        )
+    await _refresh_context_project_state(context, project_id)
     return CommandOutcome(ok=True, message=f"Message queued [{thread_id}]: {task_text}")
 
 
@@ -348,6 +365,8 @@ async def _handle_plan_command(command: ParsedCommand, context: CommandContext) 
         project, state = await _select_project_state(context, project_ref)
     except LookupError:
         return CommandOutcome(ok=False, message=f"Project not found: {project_ref or 'active/latest'}", level="warning")
+    if not state.get("conversation_history"):
+        state = await _refresh_context_project_state(context, project.project_id)
     if not state.get("conversation_history"):
         return CommandOutcome(ok=False, message="Plan icin sohbet gecmisi yok. Once /r ile projeyi anlat.", level="warning")
     thread_id = _ensure_thread_id(state)
