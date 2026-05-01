@@ -73,6 +73,19 @@ def _policy_issues(relative_path: str, content: str) -> list[dict[str, str]]:
                 "message": "forbidden path override detected",
             }
         )
+    if relative_path.endswith((".html", ".css", ".js")) and (
+        '"execution_intent"' in content
+        or '"project_plan"' in content
+        or '"tasks"' in content and '"files"' in content
+    ):
+        issues.append(
+            {
+                "code": "planner_note_leaked",
+                "severity": "error",
+                "target_file": relative_path,
+                "message": "planner JSON or task notes leaked into generated frontend artifact",
+            }
+        )
     return issues
 
 

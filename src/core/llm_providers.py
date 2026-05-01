@@ -262,6 +262,7 @@ def _strip_markdown_fence(content: str) -> str:
 def _normalize_generated_artifact(content: str, target_file: str) -> str:
     stripped = _strip_markdown_fence(content).strip()
     if target_file.endswith(".html"):
+        stripped = _strip_embedded_planner_json_scripts(stripped)
         lowered = stripped.lower()
         closing_index = lowered.rfind("</html>")
         if closing_index >= 0:
@@ -285,6 +286,25 @@ def _normalize_generated_artifact(content: str, target_file: str) -> str:
         if isinstance(payload.get("content"), str):
             return payload["content"].rstrip() + "\n"
     return stripped.rstrip() + "\n"
+
+
+def _strip_embedded_planner_json_scripts(content: str) -> str:
+    def replace_if_planner(match: re.Match[str]) -> str:
+        body = match.group(1).strip()
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return match.group(0)
+        if isinstance(payload, dict) and {"execution_intent", "project_plan", "plan", "tasks", "files"}.intersection(payload):
+            return ""
+        return match.group(0)
+
+    return re.sub(
+        r"""<script\b[^>]*type=["']application/json["'][^>]*>(.*?)</script>""",
+        replace_if_planner,
+        content,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
 
 
 def _strip_trailing_json_note(content: str) -> str:
@@ -407,10 +427,4 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
             last_error = exc
             continue
 
-    return GeneratedFileContent(
-        content=_render_stub_file_content(assignment.target_file, task_description=state.get("task_description", "")),
-        provider=primary_config.provider,
-        model_name=primary_config.model_name,
-        used_stub=True,
-        fallback_reason=f"all providers failed: {last_error}",
-    )
+    raise RuntimeError(f"all Gemini worker providers failed: {last_error}")
