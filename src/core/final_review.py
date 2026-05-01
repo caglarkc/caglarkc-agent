@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -160,11 +161,21 @@ async def run_final_project_review(state: dict) -> dict[str, Any]:
     file_snapshots = await _read_generated_files(project_root, sorted(state.get("file_registry", {}).keys()))
     prompt = _review_prompt(state, file_snapshots)
     try:
-        gemini_review = await _gemini_review(
-            prompt,
-            model_name=settings.manager_model or settings.gemini_model,
-            api_key=settings.gemini_api_key,
-        )
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                gemini_review = await _gemini_review(
+                    prompt,
+                    model_name=settings.manager_model or settings.gemini_model,
+                    api_key=settings.gemini_api_key,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+        else:
+            raise last_exc or RuntimeError("Gemini final review failed")
     except Exception as exc:  # noqa: BLE001
         gemini_review = {
             "approved": True,
