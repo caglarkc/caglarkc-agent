@@ -5,6 +5,7 @@ import pytest
 from src.config.settings import Settings
 from src.core import final_review
 from src.core.llm_providers import _align_html_asset_links, _fallback_chain, _normalize_generated_artifact, _worker_model_config
+from src.graph.nodes.validator import _policy_issues
 
 
 def test_worker_model_config_uses_gemini_for_all_workers() -> None:
@@ -40,6 +41,16 @@ def test_html_generation_trims_trailing_planner_json() -> None:
     assert _normalize_generated_artifact(content, "index.html") == "<!doctype html><html><body>OK</body></html>\n"
 
 
+def test_html_generation_removes_embedded_planner_json_script() -> None:
+    content = (
+        '<!doctype html><html><head><script type="application/json">'
+        '{"execution_intent":"apply","project_plan":{}}'
+        "</script></head><body>OK</body></html>"
+    )
+
+    assert _normalize_generated_artifact(content, "index.html") == "<!doctype html><html><head></head><body>OK</body></html>\n"
+
+
 def test_javascript_generation_trims_trailing_planner_json() -> None:
     content = "document.addEventListener('DOMContentLoaded', () => {});\n{\"execution_intent\":\"apply\"}\n"
 
@@ -51,6 +62,12 @@ def test_html_asset_links_align_to_planned_frontend_files() -> None:
     state = {"file_registry": {"index.html": "planned", "styles.css": "planned", "script.js": "planned"}}
 
     assert _align_html_asset_links(content, state) == '<link rel="stylesheet" href="styles.css"><script src="script.js"></script>'
+
+
+def test_frontend_policy_rejects_leaked_planner_json() -> None:
+    issues = _policy_issues("index.html", '<script type="application/json">{"execution_intent":"apply"}</script>')
+
+    assert any(issue["code"] == "planner_note_leaked" for issue in issues)
 
 
 @pytest.mark.asyncio
