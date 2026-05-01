@@ -4,7 +4,13 @@ import pytest
 
 from src.config.settings import Settings
 from src.core import final_review
-from src.core.llm_providers import _align_html_asset_links, _fallback_chain, _normalize_generated_artifact, _worker_model_config
+from src.core.llm_providers import (
+    InvalidGeneratedArtifactError,
+    _align_html_asset_links,
+    _fallback_chain,
+    _normalize_generated_artifact,
+    _worker_model_config,
+)
 from src.graph.nodes.validator import _policy_issues
 
 
@@ -55,6 +61,11 @@ def test_javascript_generation_trims_trailing_planner_json() -> None:
     content = "document.addEventListener('DOMContentLoaded', () => {});\n{\"execution_intent\":\"apply\"}\n"
 
     assert _normalize_generated_artifact(content, "script.js") == "document.addEventListener('DOMContentLoaded', () => {});\n"
+
+
+def test_javascript_generation_rejects_pure_planner_json() -> None:
+    with pytest.raises(InvalidGeneratedArtifactError):
+        _normalize_generated_artifact('{"plan":[]}', "app.js")
 
 
 def test_html_asset_links_align_to_planned_frontend_files() -> None:
