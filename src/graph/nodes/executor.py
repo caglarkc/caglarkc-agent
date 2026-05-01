@@ -79,6 +79,9 @@ async def _check_static_site(project_root: Path, outputs: list[str]) -> list[dic
             issues.append("missing <html> root")
         if "<body" not in content.lower():
             issues.append("missing <body> section")
+        closing_index = content.lower().rfind("</html>")
+        if closing_index >= 0 and content[closing_index + len("</html>") :].strip():
+            issues.append(f"{html_file} has trailing content after </html>")
         for linked in css_files + js_files:
             if linked not in output_set:
                 continue

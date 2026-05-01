@@ -181,6 +181,8 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
                 "If feedback says a local CSS asset is missing, remove the url(...) dependency or replace it with a CSS-only gradient/color.",
             ]
         )
+    if suffix == ".html":
+        output_rules.append("Return one complete HTML document only; do not append JSON, plans, notes, or text after </html>.")
     related_issues = [
         issue
         for issue in [*state.get("revision_tasks", []), *state.get("validation_issues", []), *state.get("runtime_errors", [])]
@@ -257,6 +259,11 @@ def _strip_markdown_fence(content: str) -> str:
 
 def _normalize_generated_artifact(content: str, target_file: str) -> str:
     stripped = _strip_markdown_fence(content).strip()
+    if target_file.endswith(".html"):
+        lowered = stripped.lower()
+        closing_index = lowered.rfind("</html>")
+        if closing_index >= 0:
+            return stripped[: closing_index + len("</html>")].rstrip() + "\n"
     if not stripped.startswith("{"):
         return stripped.rstrip() + "\n"
     try:
