@@ -36,6 +36,10 @@ class GeneratedFileContent:
     fallback_reason: str | None = None
 
 
+class InvalidGeneratedArtifactError(ValueError):
+    pass
+
+
 def _render_stub_file_content(target_file: str, *, task_description: str = "") -> str:
     task_note = task_description.strip() or "generated project"
     if target_file == "api_contract.json":
@@ -285,6 +289,8 @@ def _normalize_generated_artifact(content: str, target_file: str) -> str:
                     return item["content"].rstrip() + "\n"
         if isinstance(payload.get("content"), str):
             return payload["content"].rstrip() + "\n"
+        if Path(target_file).suffix.lower() != ".json" and {"execution_intent", "project_plan", "plan", "tasks", "files"}.intersection(payload):
+            raise InvalidGeneratedArtifactError("model returned planner JSON instead of raw file content")
     return stripped.rstrip() + "\n"
 
 
@@ -391,6 +397,34 @@ async def _try_provider(config: WorkerModelConfig, settings: Settings, system_pr
     return _strip_markdown_fence(_content_to_text(response.content))
 
 
+async def _repair_provider_output(
+    config: WorkerModelConfig,
+    settings: Settings,
+    *,
+    target_file: str,
+    invalid_content: str,
+    original_user_prompt: str,
+) -> str:
+    suffix = Path(target_file).suffix.lower().lstrip(".") or "text"
+    repair_system = (
+        "You repair invalid code-generation worker outputs. "
+        f"Return only the raw {suffix} file body for {target_file}. "
+        "Do not return JSON, plans, Markdown fences, explanations, or filenames."
+    )
+    repair_user = "\n".join(
+        [
+            "Original assignment context:",
+            _compact_text(original_user_prompt, max_chars=2_000),
+            "",
+            "Invalid previous output:",
+            _compact_text(invalid_content, max_chars=2_000),
+            "",
+            f"Return only the corrected raw file body for {target_file}.",
+        ]
+    )
+    return await _try_provider(config, settings, repair_system, repair_user)
+
+
 async def generate_file_content(state: dict, assignment: DispatchAssignment) -> GeneratedFileContent:
     settings = get_settings()
     primary_config = _worker_model_config(assignment.worker_id, settings)
@@ -410,10 +444,18 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
 
     for config in chain:
         try:
-            content = _normalize_generated_artifact(
-                await _try_provider(config, settings, system_prompt, user_prompt),
-                assignment.target_file,
-            )
+            raw_content = await _try_provider(config, settings, system_prompt, user_prompt)
+            try:
+                content = _normalize_generated_artifact(raw_content, assignment.target_file)
+            except InvalidGeneratedArtifactError:
+                repaired = await _repair_provider_output(
+                    config,
+                    settings,
+                    target_file=assignment.target_file,
+                    invalid_content=raw_content,
+                    original_user_prompt=user_prompt,
+                )
+                content = _normalize_generated_artifact(repaired, assignment.target_file)
             if assignment.target_file.endswith(".html"):
                 content = _align_html_asset_links(content, state)
             fallback_reason = f"fallback from {primary_config.provider}" if config.provider != primary_config.provider else None
