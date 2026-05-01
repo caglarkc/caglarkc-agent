@@ -63,6 +63,12 @@ def test_javascript_generation_trims_trailing_planner_json() -> None:
     assert _normalize_generated_artifact(content, "script.js") == "document.addEventListener('DOMContentLoaded', () => {});\n"
 
 
+def test_javascript_generation_trims_trailing_planner_json_comment() -> None:
+    content = "document.addEventListener('DOMContentLoaded', () => {});\n/*\n{\"execution_intent\":\"apply\",\"plan\":[]}\n*/\n"
+
+    assert _normalize_generated_artifact(content, "script.js") == "document.addEventListener('DOMContentLoaded', () => {});\n"
+
+
 def test_javascript_generation_rejects_pure_planner_json() -> None:
     with pytest.raises(InvalidGeneratedArtifactError):
         _normalize_generated_artifact('{"plan":[]}', "app.js")
