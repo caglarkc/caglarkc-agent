@@ -400,6 +400,14 @@ def _strip_embedded_planner_json_scripts(content: str) -> str:
 
 
 def _strip_trailing_json_note(content: str) -> str:
+    block_comment = re.search(r"""\n\s*/\*\s*(\{.*\})\s*\*/\s*$""", content, flags=re.DOTALL)
+    if block_comment:
+        try:
+            payload = json.loads(block_comment.group(1))
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict) and {"execution_intent", "project_plan", "plan", "tasks", "files"}.intersection(payload):
+            return content[: block_comment.start()].rstrip()
     for marker in ("\n{", "\r\n{"):
         index = content.rfind(marker)
         if index < 0:
