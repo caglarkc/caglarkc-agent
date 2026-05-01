@@ -271,6 +271,28 @@ async def test_plan_command_requests_plan_from_existing_conversation(
 
 
 @pytest.mark.asyncio
+async def test_change_plan_command_marks_scope_change_and_requests_replan(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _configure_paths(monkeypatch, tmp_path)
+    event_bus = FakeEventBus()
+    state_manager = FakeStateManager()
+    context = CommandContext(event_bus, None, CLINotifier(), state_manager, None, None)
+    await execute_command('/new "proje-site"', context)
+
+    outcome = await execute_command("/changePlan sadece tek HTML dosyasi olsun", context)
+
+    assert outcome.ok is True
+    assert context.current_state["project_name"] == "proje-site"
+    assert context.current_state["scope_changed"] is True
+    event_name, payload = event_bus.events[0]
+    assert event_name == "task.received"
+    assert payload["payload"]["scope_changed"] is True
+    assert payload["payload"]["execution_requested"] is True
+
+
+@pytest.mark.asyncio
 async def test_resume_by_project_name_restores_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
