@@ -163,8 +163,12 @@ class ManagerPlanningService:
             explicit=normalized_intent.explicit,
             reason=normalized_intent.reason or parsed.execution_intent,
         )
+        fallback_plan = parsed.plan or draft or _heuristic_draft_from_message(
+            _combined_user_text(user_message, parsed_history),
+            existing_draft=draft,
+        )
         final_plan = _normalize_plan_for_request(
-            parsed.plan or draft,
+            fallback_plan,
             user_message=user_message,
             conversation_history=parsed_history,
         )
@@ -406,12 +410,48 @@ def _heuristic_draft_from_message(user_message: str, *, existing_draft: PlanDraf
             PlannedFile(path="tests/test_api.py", description="Cover the main API flow.", dependencies=["app.py"], task_type="test_file"),
         ]
         return PlanDraft(summary=text, sprint_type="feature", files=files)
-    if "restoran" in lowered or "restaurant" in lowered or "site" in lowered or "landing" in lowered or "web" in lowered:
+    if "restoran" in lowered or "restaurant" in lowered:
         files = [
             PlannedFile(path="index.html", description="Build the restaurant landing page markup.", dependencies=[], task_type="frontend_markup"),
             PlannedFile(path="styles.css", description="Style the restaurant site with responsive layout.", dependencies=[], task_type="frontend_style"),
             PlannedFile(path="script.js", description="Add lightweight menu/reservation interactions.", dependencies=[], task_type="frontend_script"),
         ]
+        return PlanDraft(summary=text, sprint_type="feature", files=files)
+    if "site" in lowered or "landing" in lowered or "web" in lowered or "html" in lowered:
+        debt_tracker = "borç" in lowered or "borc" in lowered or "debt" in lowered
+        if debt_tracker:
+            files = [
+                PlannedFile(
+                    path="index.html",
+                    description=(
+                        "Build the static debt tracking app markup with debtor form, summary totals, "
+                        "filterable debt list, and empty states. It must run by opening index.html."
+                    ),
+                    dependencies=[],
+                    task_type="frontend_markup",
+                ),
+                PlannedFile(
+                    path="styles.css",
+                    description="Style the debt tracker as a responsive, readable financial dashboard.",
+                    dependencies=[],
+                    task_type="frontend_style",
+                ),
+                PlannedFile(
+                    path="script.js",
+                    description=(
+                        "Implement localStorage-backed debt add/edit/delete, paid/unpaid state, "
+                        "search/filtering, and total calculations with no backend."
+                    ),
+                    dependencies=[],
+                    task_type="frontend_script",
+                ),
+            ]
+        else:
+            files = [
+                PlannedFile(path="index.html", description="Build the static website markup.", dependencies=[], task_type="frontend_markup"),
+                PlannedFile(path="styles.css", description="Style the static website with responsive layout.", dependencies=[], task_type="frontend_style"),
+                PlannedFile(path="script.js", description="Add lightweight static-site interactions.", dependencies=[], task_type="frontend_script"),
+            ]
         return PlanDraft(summary=text, sprint_type="feature", files=files)
     if "modul" in lowered or "module" in lowered or "ekle" in lowered or "add" in lowered:
         files = [
@@ -430,7 +470,7 @@ def _normalize_plan_for_request(
 ) -> PlanDraft | None:
     if plan is None:
         return None
-    combined = " ".join([turn.content for turn in conversation_history if turn.role == "user"] + [user_message]).lower()
+    combined = _combined_user_text(user_message, conversation_history).lower()
     wants_frontend = any(keyword in combined for keyword in ("restoran", "restaurant", "site", "web", "landing"))
     wants_three_workers = any(keyword in combined for keyword in ("3 ai", "üç ai", "uc ai", "3 ayrı", "üç ayrı", "uc ayri", "three"))
     if wants_frontend:
@@ -471,6 +511,10 @@ def _normalize_plan_for_request(
             ),
         ],
     )
+
+
+def _combined_user_text(user_message: str, conversation_history: list[PlanConversationTurn]) -> str:
+    return " ".join([turn.content for turn in conversation_history if turn.role == "user"] + [user_message])
 
 
 def _extract_json_object(value: str) -> str | None:
