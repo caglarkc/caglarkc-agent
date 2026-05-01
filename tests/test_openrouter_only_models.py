@@ -4,7 +4,7 @@ import pytest
 
 from src.config.settings import Settings
 from src.core import final_review
-from src.core.llm_providers import _fallback_chain, _normalize_generated_artifact, _worker_model_config
+from src.core.llm_providers import _align_html_asset_links, _fallback_chain, _normalize_generated_artifact, _worker_model_config
 
 
 def test_worker_model_config_uses_gemini_for_all_workers() -> None:
@@ -38,6 +38,19 @@ def test_html_generation_trims_trailing_planner_json() -> None:
     content = "<!doctype html><html><body>OK</body></html>\n{\"plan\": {}}\n"
 
     assert _normalize_generated_artifact(content, "index.html") == "<!doctype html><html><body>OK</body></html>\n"
+
+
+def test_javascript_generation_trims_trailing_planner_json() -> None:
+    content = "document.addEventListener('DOMContentLoaded', () => {});\n{\"execution_intent\":\"apply\"}\n"
+
+    assert _normalize_generated_artifact(content, "script.js") == "document.addEventListener('DOMContentLoaded', () => {});\n"
+
+
+def test_html_asset_links_align_to_planned_frontend_files() -> None:
+    content = '<link rel="stylesheet" href="style.css"><script src="app.js"></script>'
+    state = {"file_registry": {"index.html": "planned", "styles.css": "planned", "script.js": "planned"}}
+
+    assert _align_html_asset_links(content, state) == '<link rel="stylesheet" href="styles.css"><script src="script.js"></script>'
 
 
 @pytest.mark.asyncio
