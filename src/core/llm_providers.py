@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 import httpx
@@ -176,6 +177,7 @@ def build_worker_prompt(state: dict, assignment: DispatchAssignment) -> tuple[st
         output_rules.extend(
             [
                 "When repairing frontend files, align HTML, CSS, and JavaScript selectors exactly with the related snapshots.",
+                "If this is HTML, link the exact generated CSS and JavaScript filenames listed in the project plan.",
                 "If feedback says a selector/id/class is missing and this target is HTML, add the missing matching element.",
                 "If feedback says a selector/id/class is missing and this target is JavaScript, either use an existing selector from HTML or guard querySelector/getElementById results before addEventListener/classList access.",
                 "If feedback says a local CSS asset is missing, remove the url(...) dependency or replace it with a CSS-only gradient/color.",
@@ -263,7 +265,9 @@ def _normalize_generated_artifact(content: str, target_file: str) -> str:
         lowered = stripped.lower()
         closing_index = lowered.rfind("</html>")
         if closing_index >= 0:
-            return stripped[: closing_index + len("</html>")].rstrip() + "\n"
+            stripped = stripped[: closing_index + len("</html>")].rstrip()
+    if Path(target_file).suffix.lower() in {".html", ".css", ".js"}:
+        stripped = _strip_trailing_json_note(stripped)
     if not stripped.startswith("{"):
         return stripped.rstrip() + "\n"
     try:
@@ -281,6 +285,44 @@ def _normalize_generated_artifact(content: str, target_file: str) -> str:
         if isinstance(payload.get("content"), str):
             return payload["content"].rstrip() + "\n"
     return stripped.rstrip() + "\n"
+
+
+def _strip_trailing_json_note(content: str) -> str:
+    for marker in ("\n{", "\r\n{"):
+        index = content.rfind(marker)
+        if index < 0:
+            continue
+        candidate = content[index + 1 :].strip()
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and {"execution_intent", "plan", "tasks", "files"}.intersection(payload):
+            return content[:index].rstrip()
+    return content
+
+
+def _align_html_asset_links(content: str, state: dict) -> str:
+    planned_files = sorted(state.get("file_registry", {}).keys())
+    css_files = [Path(path).name for path in planned_files if Path(path).suffix.lower() == ".css"]
+    js_files = [Path(path).name for path in planned_files if Path(path).suffix.lower() == ".js"]
+    if len(css_files) == 1:
+        css_name = css_files[0]
+        content = re.sub(
+            r"""(<link\b[^>]*\brel=["']stylesheet["'][^>]*\bhref=["'])([^"']+)(["'][^>]*>)""",
+            lambda match: f"{match.group(1)}{css_name}{match.group(3)}",
+            content,
+            flags=re.IGNORECASE,
+        )
+    if len(js_files) == 1:
+        js_name = js_files[0]
+        content = re.sub(
+            r"""(<script\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>\s*</script>)""",
+            lambda match: f"{match.group(1)}{js_name}{match.group(3)}",
+            content,
+            flags=re.IGNORECASE,
+        )
+    return content
 
 
 async def _direct_chat_response(config: WorkerModelConfig, settings: Settings, system_prompt: str, user_prompt: str) -> str | None:
@@ -352,6 +394,8 @@ async def generate_file_content(state: dict, assignment: DispatchAssignment) -> 
                 await _try_provider(config, settings, system_prompt, user_prompt),
                 assignment.target_file,
             )
+            if assignment.target_file.endswith(".html"):
+                content = _align_html_asset_links(content, state)
             fallback_reason = f"fallback from {primary_config.provider}" if config.provider != primary_config.provider else None
             return GeneratedFileContent(
                 content=content,
