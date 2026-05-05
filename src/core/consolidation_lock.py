@@ -25,7 +25,7 @@ async def read_last_consolidated_ms(lock_path: Path) -> float:
 
 
 async def _read_lock_pid(lock_path: Path) -> int | None:
-    async def _read() -> int | None:
+    def _read() -> int | None:
         try:
             raw = lock_path.read_text(encoding="utf-8").strip()
             pid = int(raw)
@@ -68,7 +68,7 @@ async def try_acquire_consolidation_lock(
     async def _write_pid() -> None:
         pid_str = str(os.getpid())
 
-        async def _inner() -> None:
+        def _inner() -> None:
             lock_path.parent.mkdir(parents=True, exist_ok=True)
             lock_path.write_text(pid_str, encoding="utf-8")
 
