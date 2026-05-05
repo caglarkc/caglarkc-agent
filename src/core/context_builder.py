@@ -59,14 +59,27 @@ class ContextBuilder:
         await self._project_manager.write_context_debug(project_name, summary)
         return summary
 
+    async def _load_planner_memory_slice(self, project_name: str) -> str:
+        path = planner_memory_path(project_name)
+        if not await aiofiles.ospath.exists(path):
+            return ""
+        async with aiofiles.open(path, encoding="utf-8") as handle:
+            raw = await handle.read()
+        normalized = " ".join(raw.splitlines())
+        cap = min(1200, max(200, self.MAX_CHARS // 6))
+        if len(normalized) <= cap:
+            return normalized
+        return normalized[: cap - 3] + "..."
+
     def _trim_context(self, summary: str) -> str:
         if len(summary) <= self.MAX_CHARS:
             return summary
         lines = summary.splitlines()
+        tier0 = [line for line in lines if line.startswith("[Tier0]")]
         tier1 = [line for line in lines if line.startswith("[Tier1]")]
         tier2 = [line for line in lines if line.startswith("[Tier2]")]
         tier3 = [line for line in lines if line.startswith("[Tier3]")]
-        kept = tier1[:]
+        kept = tier0[:] + tier1[:]
         budget = self.MAX_CHARS - len("\n".join(kept))
         for bucket in (tier2, tier3):
             for line in bucket:
