@@ -195,15 +195,6 @@ async def reviewer_node(state: dict) -> dict:
             decision_summary = "Reviewer approved sprint outputs."
             decision_rationale = "All files completed, executor/validator passed, and final model review found no blocking issues."
             await repository.update_sprint_status(project_id, state.get("current_sprint", 1), status="approved", review_cycles=review_cycles)
-            await ProjectManager().update_plan_snapshot(
-                state["project_name"],
-                sprint_number=state.get("current_sprint", 1),
-                sprint_type=state.get("sprint_type", "feature"),
-                status="approved",
-                files=list(file_registry.keys()),
-                dependencies=state.get("dependencies", {}),
-                plan_version=state.get("plan_version", 1),
-            )
     else:
         updates = {
             "sprint_status": "fail",

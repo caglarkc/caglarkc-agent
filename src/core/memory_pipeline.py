@@ -309,6 +309,13 @@ async def _run_memory_pipeline(ctx: MemoryReviewContext) -> None:
             ctx.thread_id,
             {"phase": "consolidation", "error": str(exc)},
         )
+        await _emit(
+            bus,
+            "memory.pipeline_completed",
+            ctx.project_id,
+            ctx.thread_id,
+            {"phase": "consolidation", "outcome": "failed"},
+        )
 
 
 async def schedule_memory_pipeline_after_review(ctx: MemoryReviewContext) -> None:
