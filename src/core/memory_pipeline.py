@@ -209,6 +209,13 @@ async def _run_memory_pipeline(ctx: MemoryReviewContext) -> None:
             ctx.thread_id,
             {"phase": "extract", "error": str(exc)},
         )
+        await _emit(
+            bus,
+            "memory.pipeline_completed",
+            ctx.project_id,
+            ctx.thread_id,
+            {"phase": "extract", "outcome": "failed"},
+        )
         return
 
     if not settings.memory_consolidation_enabled:
@@ -334,8 +341,9 @@ async def schedule_memory_pipeline_after_review(ctx: MemoryReviewContext) -> Non
             try:
                 await _run_memory_pipeline(ctx)
             finally:
-                task = _TASKS.get(ctx.project_id)
-                if task is asyncio.current_task():
+                current = asyncio.current_task()
+                stored = _TASKS.get(ctx.project_id)
+                if stored is current:
                     _TASKS.pop(ctx.project_id, None)
 
         _TASKS[ctx.project_id] = asyncio.create_task(_wrapped(), name=f"memory-pipeline:{ctx.project_id}")
