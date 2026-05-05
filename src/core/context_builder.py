@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+import aiofiles
+import aiofiles.ospath
+
 from src.config.settings import get_settings
+from src.core.memory_paths import planner_memory_path
 from src.core.project_manager import ProjectManager
 from src.storage.repository import Repository
 
@@ -27,6 +31,10 @@ class ContextBuilder:
         failures = await self._repository.list_worker_failures(project_id)
         failure_patterns = self._summarize_failures(failures)
         latest_sprint = sprints[-1] if sprints else None
+        planner_memory = await self._load_planner_memory_slice(project_name)
+        tier0 = []
+        if planner_memory.strip():
+            tier0 = [f"[Tier0] Planner Memory: {planner_memory.strip()}"]
         tier1 = [
             f"[Tier1] Proje: {project_name} | Aktif Sprint: {latest_sprint.number if latest_sprint else 0} | Durum: {project.status if project else 'unknown'}",
             f"[Tier1] Mimari/Contract Kararlari: {' | '.join(item.summary for item in decisions) or 'yok'}",
@@ -47,7 +55,7 @@ class ContextBuilder:
             f"[Tier3] Son Dosyalar: {', '.join(item.path for item in files[-10:]) or 'yok'}",
             f"[Tier3] Revizyon Gecmisi: {' | '.join(item.task_type for item in failures[:10]) or 'yok'}",
         ]
-        summary = self._trim_context("\n".join([*tier1, *tier2, *tier3]))
+        summary = self._trim_context("\n".join([*tier0, *tier1, *tier2, *tier3]))
         await self._project_manager.write_context_debug(project_name, summary)
         return summary
 

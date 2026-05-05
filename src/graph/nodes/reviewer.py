@@ -242,4 +242,21 @@ async def reviewer_node(state: dict) -> dict:
         persisted = transaction.state
         persisted.update(updates)
         transaction.state = persisted
+
+    if updates.get("sprint_status") in {"approved", "fail"}:
+        reg = dict(updates.get("file_registry", file_registry))
+        deps: dict[str, list[str]] = {k: list(v) for k, v in (updates.get("dependencies") or state.get("dependencies") or {}).items()}
+        ctx = MemoryReviewContext(
+            project_id=project_id,
+            project_name=state["project_name"],
+            thread_id=thread_id,
+            current_sprint=int(state.get("current_sprint", 1)),
+            sprint_status=str(updates.get("sprint_status", "")),
+            reviewer_decision=str(updates.get("reviewer_decision", "")),
+            file_registry=reg,
+            dependencies=deps,
+            plan_version=int(state.get("plan_version", 1)),
+        )
+        asyncio.create_task(schedule_memory_pipeline_after_review(ctx))
+
     return updates
