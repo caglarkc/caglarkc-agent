@@ -6,13 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.config.settings import get_settings
-from src.core.event_bus import EventBus
 from src.core.memory_pipeline import MemoryReviewContext, _run_memory_pipeline, schedule_memory_pipeline_after_review
-
-
-@pytest.fixture(autouse=True)
-def _reset_bus() -> None:
-    asyncio.get_event_loop().run_until_complete(EventBus().reset())
 
 
 @pytest.fixture
