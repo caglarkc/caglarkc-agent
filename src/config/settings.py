@@ -35,6 +35,33 @@ class Settings(BaseSettings):
     context_max_decisions: int = Field(default=5, alias="CONTEXT_MAX_DECISIONS")
     context_output_file: str = Field(default="context.md", alias="CONTEXT_OUTPUT_FILE")
 
+    # Persistent project memory (dream / consolidation) — under projects/<name>/.meta/memory/
+    memory_auto_enabled: bool = Field(default=True, alias="MEMORY_AUTO_ENABLED")
+    memory_consolidation_enabled: bool = Field(default=True, alias="MEMORY_CONSOLIDATION_ENABLED")
+    memory_relative_dir: str = Field(default=".meta/memory", alias="MEMORY_RELATIVE_DIR")
+    memory_planner_summary_file: str = Field(
+        default="planner_memory.md",
+        alias="MEMORY_PLANNER_SUMMARY_FILE",
+    )
+    memory_min_hours_between_runs: float = Field(default=24.0, alias="MEMORY_MIN_HOURS_BETWEEN_RUNS")
+    memory_min_sessions: int = Field(default=5, alias="MEMORY_MIN_SESSIONS")
+    memory_session_scan_interval_seconds: float = Field(
+        default=600.0,
+        alias="MEMORY_SESSION_SCAN_INTERVAL_SECONDS",
+    )
+    memory_lock_holder_stale_seconds: float = Field(
+        default=3600.0,
+        alias="MEMORY_LOCK_HOLDER_STALE_SECONDS",
+    )
+    memory_consolidation_use_llm: bool = Field(
+        default=False,
+        alias="MEMORY_CONSOLIDATION_USE_LLM",
+    )
+    memory_consolidation_max_input_chars: int = Field(
+        default=12_000,
+        alias="MEMORY_CONSOLIDATION_MAX_INPUT_CHARS",
+    )
+
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_base_url: str = Field(
         default="https://generativelanguage.googleapis.com",
