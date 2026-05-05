@@ -1,0 +1,72 @@
+Dream / auto-dream feature — file manifest
+============================================
+Workspace: sentinel-coming/agentic/cli-claude
+Bundle dir: dream-feature-bundle/mirror/  (paths below are relative to mirror/)
+
+A) COPIED INTO mirror/ (21 files)
+---------------------------------
+These are verbatim copies from src/ for offline reading or porting. Imports still
+point at .js extension paths as in the original project.
+
+Core service
+  src/services/autoDream/autoDream.ts          — orchestration, gates, forked run
+  src/services/autoDream/config.ts              — isAutoDreamEnabled + GrowthBook
+  src/services/autoDream/consolidationLock.ts   — .consolidate-lock, session scan
+  src/services/autoDream/consolidationPrompt.ts — buildConsolidationPrompt text
+
+Task model + registry
+  src/tasks/DreamTask/DreamTask.ts
+  src/tasks/types.ts                            — DreamTaskState in unions
+  src/tasks/pillLabel.ts                        — footer pill "dreaming"
+  src/tasks.ts                                  — DreamTask registration
+
+Lifecycle / hooks
+  src/query/stopHooks.ts                        — executeAutoDream on turn end
+  src/utils/backgroundHousekeeping.ts           — initAutoDream at startup
+
+UI
+  src/components/tasks/DreamDetailDialog.tsx
+  src/components/tasks/BackgroundTasksDialog.tsx
+  src/components/tasks/BackgroundTask.tsx
+  src/components/memory/MemoryFileSelector.tsx — auto-dream toggle + last run
+
+Settings surface
+  src/utils/settings/types.ts                   — autoDreamEnabled schema (whole file)
+  src/tools/ConfigTool/supportedSettings.ts
+
+Bundled skills entry (manual /dream when KAIROS)
+  src/skills/bundled/index.ts                   — require('./dream.js') — see section C
+
+Shared runtime used by autoDream
+  src/services/extractMemories/extractMemories.ts — createAutoMemCanUseTool + extract
+  src/utils/forkedAgent.ts                        — runForkedAgent, createCacheSafeParams
+
+Memory layout constants for prompt
+  src/memdir/memdir.ts
+  src/memdir/paths.ts
+
+
+B) REFERENCED IN REPO BUT NOT COPIED (only comments / cross-feature)
+--------------------------------------------------------------------
+  src/utils/cronTasks.ts              — comments mention dream installer paths
+  src/utils/attachments.ts            — comment: /dream skill timing
+  src/memdir/paths.ts (also in A)     — comments mention autoDream
+  src/memdir/memdir.ts (also in A)    — comments mention /dream skill
+  src/commands/review/reviewRemote.ts — comment references autoDream GB validation
+
+
+C) MISSING / EXTERNAL IN THIS CHECKOUT
+--------------------------------------
+  src/skills/bundled/dream.js (or dream.ts)
+    Required by bundled/index.ts when feature('KAIROS') || feature('KAIROS_DREAM').
+    Not present under src/skills/bundled/ in this tree — likely built or shipped separately.
+
+
+D) TRANSITIVE IMPORTS (not duplicated — rest of cli-claude)
+-----------------------------------------------------------
+autoDream.ts pulls in many modules (bootstrap/state, sessionStorage, messages,
+analytics, Tool types, File* tool constants, postSamplingHooks, etc.). Those are
+not copied here; open the originals under agentic/cli-claude/src/ to follow imports.
+consolidationLock.ts uses: listSessionsImpl, genericProcessUtils, etc.
+
+This bundle is a curated slice, not a standalone compileable package.
