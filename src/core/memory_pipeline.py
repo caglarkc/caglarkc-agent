@@ -222,7 +222,7 @@ async def _run_memory_pipeline(ctx: MemoryReviewContext) -> None:
         return
 
     last_ms = await read_last_consolidated_ms(lock_path)
-    now_ms = asyncio.get_event_loop().time() * 1000.0
+    now_ms = time.time() * 1000.0
     hours_since = (now_ms - last_ms) / (1000.0 * 3600.0) if last_ms > 0 else settings.memory_min_hours_between_runs + 1.0
     if last_ms > 0 and hours_since < settings.memory_min_hours_between_runs:
         await _emit(
