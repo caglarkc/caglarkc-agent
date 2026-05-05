@@ -119,6 +119,19 @@ Input : validation_issues, execution_results, review_cycles
 Output: sprint_status ∈ {active, revision, fail, closed, rejected}
 ```
 
+### Post-sprint Memory / Dreaming (Background)
+
+After the **Reviewer** reaches a terminal sprint decision (`approved` / `fail`), ARCHON schedules a **non-blocking** background memory pipeline:
+
+- **Extract**: writes a durable sprint summary Markdown into `projects/<name>/.meta/memory/extracts/`
+- **Consolidate** (gated + locked): merges recent extracts into a planner-facing memory file (default: `planner_memory.md`)
+- **Inject**: `ContextBuilder` includes a short slice as `[Tier0] Planner Memory: ...` in future Planner prompts
+
+The consolidation step is protected by:
+- **time gate** (`MEMORY_MIN_HOURS_BETWEEN_RUNS`)
+- **activity gate** (`MEMORY_MIN_SESSIONS`, based on sprint snapshot mtimes under `.meta/sprints/`)
+- **lock file** (`.consolidate-lock`, mtime = last successful consolidation)
+
 ### Approval Gate
 
 Before any Worker phase starts, ARCHON waits for human approval. The gate is **idempotent** — duplicate approvals are rejected via `idempotency_key`. Approvals expire after 15 minutes.
@@ -272,6 +285,23 @@ FINAL_REVIEW_ENABLED=1
 FINAL_REVIEW_TIMEOUT_SECONDS=45.0
 HTTP_TIMEOUT_SECONDS=20.0
 
+# ── Memory / Dreaming (post-sprint background pipeline) ───────────
+# Writes under: projects/<project-name>/.meta/memory/
+MEMORY_AUTO_ENABLED=1
+MEMORY_CONSOLIDATION_ENABLED=1
+MEMORY_RELATIVE_DIR=.meta/memory
+MEMORY_PLANNER_SUMMARY_FILE=planner_memory.md
+
+# Gates (cheapest → most expensive): min hours → min sessions → lock
+MEMORY_MIN_HOURS_BETWEEN_RUNS=24
+MEMORY_MIN_SESSIONS=5
+MEMORY_SESSION_SCAN_INTERVAL_SECONDS=600
+MEMORY_LOCK_HOLDER_STALE_SECONDS=3600
+
+# Optional: use Gemini to consolidate extracts into planner memory
+MEMORY_CONSOLIDATION_USE_LLM=0
+MEMORY_CONSOLIDATION_MAX_INPUT_CHARS=12000
+
 # ── Telegram ─────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
@@ -361,6 +391,10 @@ archon/
 │   │   ├── state_manager.py          # In-memory + JSON snapshot persistence
 │   │   ├── project_manager.py        # Project CRUD
 │   │   ├── context_builder.py        # Context summary for prompts
+│   │   ├── memory_pipeline.py        # Post-review extract + consolidation scheduler
+│   │   ├── consolidation_lock.py     # .consolidate-lock (mtime=last run) + rollback
+│   │   ├── memory_paths.py           # Project-scoped memory root helpers
+│   │   ├── memory_sessions.py        # Sprint snapshot activity scan (mtime-based)
 │   │   ├── recovery.py               # Sprint recovery analysis
 │   │   ├── scheduler.py              # Fair scheduling across projects
 │   │   ├── state_transaction.py      # Transactional state updates
@@ -379,7 +413,7 @@ archon/
 │   │       └── reviewer.py           # Review & retry decisions
 │   │
 │   ├── storage/
-│   │   ├── models.py                 # SQLAlchemy ORM (Project, Sprint, FileRecord…)
+│   │   ├── models.py                 # Pydantic models (Project, Sprint, FileRecord…)
 │   │   └── repository.py             # Database CRUD layer
 │   │
 │   └── interfaces/
@@ -455,6 +489,11 @@ The Planner understands Turkish and English natively. Execution-intent keywords 
 ## Testing
 
 ```bash
+# Recommended: venv (PEP 668 friendly)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
 # Unit & integration tests
 pytest
 
