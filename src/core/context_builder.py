@@ -65,6 +65,10 @@ class ContextBuilder:
             return ""
         async with aiofiles.open(path, encoding="utf-8") as handle:
             raw = await handle.read()
+        if raw.strip().startswith("<!--"):
+            end = raw.find("-->")
+            if end != -1:
+                raw = raw[end + 3 :]
         normalized = " ".join(raw.splitlines())
         cap = min(1200, max(200, self.MAX_CHARS // 6))
         if len(normalized) <= cap:
