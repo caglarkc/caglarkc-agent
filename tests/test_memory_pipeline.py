@@ -26,7 +26,7 @@ def projects_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.mark.asyncio
 async def test_pipeline_writes_extract_and_planner_memory(projects_root: Path) -> None:
     root = projects_root / "Alpha"
-    (root / ".meta" / "sprints").mkdir(parents=True, parents=True)
+    (root / ".meta" / "sprints").mkdir(parents=True, exist_ok=True)
     (root / ".meta" / "sprints" / "sprint_001_v1.json").write_text("{}", encoding="utf-8")
 
     ctx = MemoryReviewContext(
@@ -56,7 +56,7 @@ async def test_pipeline_skipped_when_min_sessions_not_met(projects_root: Path, m
     get_settings.cache_clear()
 
     root = projects_root / "Beta"
-    (root / ".meta" / "sprints").mkdir(parents=True, parents=True)
+    (root / ".meta" / "sprints").mkdir(parents=True, exist_ok=True)
     (root / ".meta" / "sprints" / "sprint_001_v1.json").write_text("{}", encoding="utf-8")
 
     ctx = MemoryReviewContext(
@@ -79,7 +79,7 @@ async def test_pipeline_skipped_when_min_sessions_not_met(projects_root: Path, m
 @pytest.mark.asyncio
 async def test_schedule_dedupes_concurrent_requests(projects_root: Path) -> None:
     root = projects_root / "Gamma"
-    (root / ".meta" / "sprints").mkdir(parents=True, parents=True)
+    (root / ".meta" / "sprints").mkdir(parents=True, exist_ok=True)
     (root / ".meta" / "sprints" / "sprint_001_v1.json").write_text("{}", encoding="utf-8")
 
     ctx = MemoryReviewContext(
