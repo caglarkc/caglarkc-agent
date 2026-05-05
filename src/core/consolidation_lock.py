@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
-
-import aiofiles.os
 
 LOGGER = logging.getLogger(__name__)
 
@@ -77,7 +76,7 @@ async def try_acquire_consolidation_lock(
 
     mtime_ms = await _stat_mtime_ms()
     holder_pid = await _read_lock_pid(lock_path) if mtime_ms is not None else None
-    now_ms = await asyncio.to_thread(lambda: __import__("time").time() * 1000.0)
+    now_ms = time.time() * 1000.0
 
     if mtime_ms is not None and now_ms - mtime_ms < holder_stale_ms:
         if holder_pid is not None:
