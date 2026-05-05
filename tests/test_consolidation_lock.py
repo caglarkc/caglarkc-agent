@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from pathlib import Path
 
@@ -32,24 +31,11 @@ async def test_read_last_consolidated_ms_missing(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_live_holder_blocks_acquire(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_blocks_when_holder_pid_is_live(tmp_path: Path) -> None:
     lock_path = tmp_path / ".consolidate-lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(str(os.getpid()), encoding="utf-8")
-
-    def fake_time() -> float:
-        return 1_700_000_000.0
-
-    monkeypatch.setattr("src.core.consolidation_lock.time.time", fake_time)
-
-    def fake_stat() -> float:
-        return (1_700_000_000.0 - 60.0) * 1000.0
-
-    async def fake_read_last(path: Path) -> float:  # noqa: ARG001
-        return fake_stat()
-
-    monkeypatch.setattr("src.core.consolidation_lock.read_last_consolidated_ms", fake_read_last)
-
+    lock_path.touch()
     result = await try_acquire_consolidation_lock(lock_path, holder_stale_ms=3600_000.0)
     assert result is None
 
@@ -57,7 +43,7 @@ async def test_live_holder_blocks_acquire(tmp_path: Path, monkeypatch: pytest.Mo
 @pytest.mark.asyncio
 async def test_rollback_restores_prior_mtime(tmp_path: Path) -> None:
     lock_path = tmp_path / ".consolidate-lock"
-    prior_ms = 1_600_000_000_000.0
+    prior_ms = 1_700_000_000_000.0
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(str(os.getpid()), encoding="utf-8")
 
