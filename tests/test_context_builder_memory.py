@@ -15,7 +15,7 @@ async def test_planner_memory_slice_strips_leading_html_comment(
     monkeypatch.setenv("PROJECTS_ROOT", str(tmp_path / "projects"))
     get_settings.cache_clear()
     mem = tmp_path / "projects" / "P1" / ".meta" / "memory"
-    mem.mkdir(parents=True, parents=True)
+    mem.mkdir(parents=True, exist_ok=True)
     (mem / "planner_memory.md").write_text("<!-- consolidated_at: x -->\n\n# Title\n\nbody", encoding="utf-8")
 
     builder = ContextBuilder()
