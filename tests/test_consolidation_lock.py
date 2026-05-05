@@ -31,11 +31,17 @@ async def test_read_last_consolidated_ms_missing(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_blocks_when_holder_pid_is_live(tmp_path: Path) -> None:
+async def test_blocks_when_foreign_holder_pid_is_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     lock_path = tmp_path / ".consolidate-lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(str(os.getpid()), encoding="utf-8")
+    lock_path.write_text("999001", encoding="utf-8")
     lock_path.touch()
+    monkeypatch.setattr(
+        "src.core.consolidation_lock._is_pid_alive",
+        lambda pid: pid == 999001,
+    )
     result = await try_acquire_consolidation_lock(lock_path, holder_stale_ms=3600_000.0)
     assert result is None
 

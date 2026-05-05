@@ -79,11 +79,11 @@ async def try_acquire_consolidation_lock(
     now_ms = time.time() * 1000.0
 
     if mtime_ms is not None and now_ms - mtime_ms < holder_stale_ms:
-        if holder_pid is not None:
+        if holder_pid is not None and holder_pid != os.getpid():
             alive = await asyncio.to_thread(_is_pid_alive, holder_pid)
             if alive:
                 LOGGER.debug(
-                    "consolidation lock held by live pid=%s (mtime_age_ms=%.0f)",
+                    "consolidation lock held by another live pid=%s (mtime_age_ms=%.0f)",
                     holder_pid,
                     now_ms - mtime_ms,
                 )
