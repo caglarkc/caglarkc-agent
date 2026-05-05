@@ -24,6 +24,8 @@ class ProjectManager:
         project_root = self._settings.projects_root / project_name
         await aiofiles.os.makedirs(project_root / ".meta" / "sprints", exist_ok=True)
         await aiofiles.os.makedirs(project_root / ".meta" / "archived", exist_ok=True)
+        memory_root = project_root / Path(self._settings.memory_relative_dir)
+        await aiofiles.os.makedirs(memory_root / "extracts", exist_ok=True)
         return project_root
 
     async def write_plan(self, project_name: str, payload: dict[str, Any]) -> Path:
