@@ -1,570 +1,428 @@
-# ARCHON
+# ARCHON - AI Development Team Orchestrator
 
-> **Autonomous Multi-Agent Software Development Orchestrator**
+ARCHON is a Python-based, LangGraph-powered orchestration system for managing AI-assisted software development workflows. It turns a high-level project request into a structured plan, routes file-generation tasks through a stateful worker pipeline, validates generated artifacts, and keeps a human approval gate between planning and execution.
 
-ARCHON is a production-grade, LangGraph-powered orchestration system that coordinates multiple AI models to autonomously plan, generate, validate, and review software projects — with human approval gates at every critical decision point.
+The project is designed as a local-first engineering assistant: a user can describe a software idea from a terminal UI or Telegram, review the generated plan, approve execution, and let the orchestrator coordinate planning, file generation, validation, review, persistence, and recovery.
 
-You act as **Tech Lead**. ARCHON handles the rest: a Gemini-powered **Planner** breaks down your request, **Workers** (Ollama / OpenRouter / Gemini) generate the code, and an automated **Validator → Reviewer** loop ensures quality before anything ships.
+## Problem And Goals
 
----
+AI coding tools are useful, but larger tasks often need coordination: planning, file ownership, retries, validation, state recovery, and a reliable way for a human to approve work before files are generated. ARCHON addresses that coordination layer.
 
-## Table of Contents
+The core goals visible in this repository are:
 
-- [Architecture Overview](#architecture-overview)
-- [Agent Pipeline](#agent-pipeline)
-- [LLM Providers](#llm-providers)
-- [Interfaces](#interfaces)
-- [Skills Library](#skills-library)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Quick Start](#quick-start)
-- [CLI Command Reference](#cli-command-reference)
-- [Project Structure](#project-structure)
-- [Key Design Principles](#key-design-principles)
-- [Testing](#testing)
-- [Deployment](#deployment)
+- Convert conversational requirements into structured project plans.
+- Keep execution approval-gated so worker generation does not start accidentally.
+- Persist project, sprint, file, and decision state in SQLite.
+- Resume or recover interrupted LangGraph threads through checkpointing.
+- Route work through a deterministic graph: planner, dispatcher, worker, executor, validator, reviewer.
+- Validate generated files with syntax checks, import checks, runtime checks, and policy checks.
+- Provide local operations through a Textual CLI and optional Telegram bot interface.
+- Maintain post-sprint memory extracts for future planning context.
 
----
+## Key Features
 
-## Architecture Overview
+- **Human-in-the-loop planning**: The planner can discuss requirements, produce a structured draft plan, and wait for explicit approval before execution.
+- **LangGraph state machine**: The workflow is implemented as a resumable graph with conditional routing and SQLite checkpoints.
+- **Project and sprint persistence**: Projects, sprints, file records, decisions, and worker failures are stored with `aiosqlite`.
+- **File reservation and worker routing**: The dispatcher reserves files, respects dependencies, detects dependency cycles, and assigns work to idle workers.
+- **Gemini-backed planning and generation**: Manager planning, worker generation, and final review use Gemini when configured. A heuristic planner fallback exists for planning failures.
+- **Executor and validator loop**: Generated Python, JSON, HTML, CSS, and JavaScript artifacts are checked before review. Project-level `pytest` or `npm test` commands are run when the generated project contains the relevant config and tools are available.
+- **Final project review**: A Gemini-based final audit can inspect generated files and execution results before approving a sprint.
+- **Textual terminal UI**: A live terminal interface displays sprint status, events, approvals, and command input.
+- **Telegram interface**: Optional bot integration mirrors the workflow from an authorized chat.
+- **Provider health checks**: The codebase contains health probes for Gemini, Ollama, and OpenRouter. The active `/scan` command currently gathers Gemini status through `AIScanner.scan_all()`.
+- **Operational tooling**: Scripts cover preflight checks, health checks, connection checks, smoke tests, backup/restore tests, phase checks, and load simulation.
+- **Post-sprint memory pipeline**: Approved or failed sprints can write memory extracts and consolidate them into planner-facing Markdown under the generated project metadata folder.
+- **Skill knowledge library**: The repository includes 360 `skills/*/SKILL.md` files plus `SKILLS_INDEX.md` for planner/coder guidance.
 
+## Architecture
+
+```text
+User
+  |
+  | Textual CLI or Telegram
+  v
+EventBus
+  |
+  v
+GraphManager
+  |
+  v
+LangGraph workflow
+  |
+  +--> planner
+  +--> dispatcher
+  +--> worker
+  +--> executor
+  +--> validator
+  +--> reviewer
+  |
+  v
+SQLite repository + LangGraph checkpoint database
+  |
+  v
+projects/<project-name>/ generated output and .meta state
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                          ARCHON DAEMON                          │
-│                                                                 │
-│   ┌──────────┐     ┌────────────────────────────────────────┐  │
-│   │ Telegram │     │         LangGraph State Machine        │  │
-│   │   Bot    │     │                                        │  │
-│   └────┬─────┘     │  planner → dispatcher → worker ──┐    │  │
-│        │           │                                   ↓    │  │
-│   ┌────┴─────┐     │                              executor  │  │
-│   │ Textual  │     │                                   ↓    │  │
-│   │  TUI CLI │     │                             validator  │  │
-│   └────┬─────┘     │                                   ↓    │  │
-│        │           │                              reviewer  │  │
-│        │           │                                   ↓    │  │
-│   ┌────┴─────┐     │                          [done/retry]  │  │
-│   │ EventBus │◄────┤                                        │  │
-│   └──────────┘     └────────────────────────────────────────┘  │
-│                                                                 │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────────┐  │
-│   │  Gemini  │  │  Ollama  │  │OpenRouter│  │   SQLite    │  │
-│   │ (Planner)│  │ (Worker) │  │ (Worker) │  │ Checkpoint  │  │
-│   └──────────┘  └──────────┘  └──────────┘  └─────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+
+### Workflow Nodes
+
+1. **Planner**
+   - Reads the user request and conversation history.
+   - Uses `ManagerPlanningService` to build or refine a structured plan.
+   - Detects execution intent in Turkish and English.
+   - Emits approval requests before worker execution.
+
+2. **Dispatcher**
+   - Reads the worker queue and dependencies.
+   - Detects dependency cycles.
+   - Selects an idle worker based on failure counts and current load.
+   - Reserves one target file before generation.
+
+3. **Worker**
+   - Builds a context-rich prompt for one assigned file.
+   - Generates raw file content through the configured Gemini worker path.
+   - Writes output into `projects/<project-name>/`.
+   - Records worker success or failure in SQLite.
+
+4. **Executor**
+   - Runs targeted checks for generated artifacts.
+   - Compiles Python files, parses JSON files, checks static frontend structure, verifies DOM references, and runs generated project tests when discoverable.
+   - Uses a 20-second default timeout for individual checks.
+
+5. **Validator**
+   - Performs Python syntax and import checks.
+   - Validates JSON parsing.
+   - Applies policy checks for path traversal, prompt override text, forbidden filesystem paths, and leaked planner JSON in frontend artifacts.
+
+6. **Reviewer**
+   - Decides whether the sprint is approved, needs revision, or failed.
+   - Requeues affected files when validation or final review finds issues.
+   - Limits blocking review cycles.
+   - Writes final sprint snapshots and schedules memory extraction.
+
+## Tech Stack
+
+- **Language**: Python 3.11+
+- **Workflow orchestration**: LangGraph
+- **LLM integration**: `langchain-google-genai`, `langchain-openai`, direct HTTP calls for provider probes
+- **Primary active model path**: Gemini for manager planning, worker generation, and final review
+- **Configuration**: Pydantic Settings from `.env`
+- **Persistence**: SQLite through `aiosqlite`
+- **Checkpointing**: `langgraph-checkpoint-sqlite`
+- **CLI UI**: Textual and Rich
+- **Telegram integration**: `python-telegram-bot`
+- **Async IO**: `asyncio`, `httpx`, `aiofiles`
+- **Testing**: pytest and pytest-asyncio
+- **Service deployment**: systemd unit file
+
+## Important Modules And Folders
+
+```text
+.
+|-- main.py                         # Daemon entry point and service lifecycle
+|-- pyproject.toml                  # Package metadata, dependencies, pytest config
+|-- .env.example                    # Environment variable template
+|-- ai-orchestrator.service         # systemd service unit
+|-- RUNBOOK.md                      # Local CLI workflow notes
+|-- docs/                           # Operations, deployment, planning, worker docs
+|-- documents/                      # Integration notes and reference material
+|-- scripts/                        # Preflight, health, smoke, load, phase checks
+|-- skills/                         # 360 skill documents for planner/coder guidance
+|-- SKILLS_INDEX.md                 # Annotated skill index
+|-- src/
+|   |-- config/                     # Settings and logging configuration
+|   |-- core/                       # Planning, graph management, providers, memory, recovery
+|   |-- graph/                      # LangGraph state, edges, and workflow nodes
+|   |-- interfaces/cli/             # Textual CLI app, panels, commands, notifications
+|   |-- interfaces/telegram/        # Telegram bot, handlers, notifier, views
+|   `-- storage/                    # SQLite repository and Pydantic storage models
+|-- tests/                          # Unit and integration tests
+|-- data/                           # Runtime data and SQLite files, gitignored where needed
+|-- logs/                           # Runtime logs, gitignored
+`-- projects/                       # Generated project outputs, gitignored
 ```
 
-ARCHON is built on three layers:
+## Configuration
 
-| Layer | Components |
+Copy `.env.example` to `.env` and fill in the values required for your workflow.
+
+```bash
+cp .env.example .env
+```
+
+Environment variables discoverable from `.env.example` and `src/config/settings.py`:
+
+| Variable | Purpose |
 |---|---|
-| **Orchestration** | LangGraph state machine, GraphManager, StateManager, EventBus |
-| **Intelligence** | ManagerPlanningService (Gemini), LLM worker chain, FinalReview auditor |
-| **Infrastructure** | SQLite persistence, RetryPolicy, ApprovalGuard, AIScanner health checks |
+| `APP_NAME` | Application name used in status output. |
+| `APP_ENV` | Runtime environment label. |
+| `LOG_LEVEL` | Logging level. |
+| `LOG_DIR` | Log output directory. |
+| `LOG_FILE_NAME` | Main log filename. |
+| `LOG_MAX_BYTES` | Rotating log file size. |
+| `LOG_BACKUP_COUNT` | Number of rotated log backups. |
+| `DATA_DIR` | Runtime data directory. |
+| `PROJECTS_ROOT` | Directory where generated projects are written. |
+| `SQLITE_DB_PATH` | Main application SQLite database. |
+| `GRAPH_CHECKPOINT_PATH` | LangGraph checkpoint SQLite database. |
+| `GRAPH_THREAD_PREFIX` | Prefix used for graph thread naming. |
+| `HTTP_TIMEOUT_SECONDS` | HTTP timeout used by model and provider calls. |
+| `CONTEXT_MAX_DECISIONS` | Maximum number of decisions included in context. |
+| `CONTEXT_OUTPUT_FILE` | Project metadata context filename. |
+| `GEMINI_API_KEY` | Gemini API key for planning, generation, scanning, and review. |
+| `GEMINI_BASE_URL` | Gemini API base URL. |
+| `GEMINI_MODEL` | Gemini model used by workers and fallback paths. |
+| `MANAGER_USE_GEMINI` | Enables Gemini-backed manager planning. |
+| `MANAGER_MODEL` | Gemini model used by manager planning and final review. |
+| `MANAGER_MAX_HISTORY_TURNS` | Conversation history limit for planning. |
+| `USE_LEGACY_PLANNER` | Legacy planner switch. |
+| `OLLAMA_BASE_URL` | Ollama endpoint used by preflight and probe code. |
+| `OLLAMA_MODEL` | Ollama model name expected by preflight and probe code. |
+| `OPENROUTER_BASE_URL` | OpenRouter API base URL used by probe code. |
+| `OPENROUTER_MODEL` | Primary OpenRouter model configured for probes/settings. |
+| `OPENROUTER_MODEL_SECONDARY` | Secondary OpenRouter model configured for probes/settings. |
+| `OPENROUTER_API_KEY_PRIMARY` | Primary OpenRouter key. |
+| `OPENROUTER_API_KEY_SECONDARY` | Secondary OpenRouter key. |
+| `WORKER_USE_STUB` | Uses deterministic stub content instead of real worker generation. |
+| `FINAL_REVIEW_ENABLED` | Enables final model review after validation. |
+| `FINAL_REVIEW_TIMEOUT_SECONDS` | Timeout for final review requests. |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token. |
+| `TELEGRAM_CHAT_ID` | Authorized Telegram chat ID. |
+| `MEMORY_AUTO_ENABLED` | Enables post-sprint memory behavior in settings. |
+| `MEMORY_CONSOLIDATION_ENABLED` | Enables memory consolidation. |
+| `MEMORY_RELATIVE_DIR` | Project-relative memory metadata folder. |
+| `MEMORY_PLANNER_SUMMARY_FILE` | Consolidated planner memory filename. |
+| `MEMORY_MIN_HOURS_BETWEEN_RUNS` | Time gate for memory consolidation. |
+| `MEMORY_MIN_SESSIONS` | Session activity gate for memory consolidation. |
+| `MEMORY_SESSION_SCAN_INTERVAL_SECONDS` | Throttle for scanning sprint snapshots. |
+| `MEMORY_LOCK_HOLDER_STALE_SECONDS` | Stale lock threshold. |
+| `MEMORY_CONSOLIDATION_USE_LLM` | Optionally uses Gemini for consolidation. |
+| `MEMORY_CONSOLIDATION_MAX_INPUT_CHARS` | Maximum consolidation input size. |
 
----
+### Configuration Notes
 
-## Agent Pipeline
-
-Each task flows through a deterministic six-node pipeline. The graph is stateful: every transition is persisted to SQLite and can be resumed after a crash.
-
-### 1. Planner
-Receives your message and conversation history. Calls **Gemini** to produce a `PlanDraft` — a structured list of files, types, and dependencies — and determines whether to discuss further or proceed to execution. Routes to the **Approval Gate** when execution intent is detected.
-
-```
-Input : task_description, conversation_history
-Output: draft_plan (files + dependencies), manager_reply, awaiting_approval
-```
-
-### 2. Dispatcher
-Inspects the worker queue, detects dependency cycles, selects the idle worker with the lowest failure count, and atomically reserves a file for generation. Prevents concurrent writes via a file reservation system.
-
-```
-Input : worker_queue, dependency graph, file_registry
-Output: active_assignment, updated worker_status
-```
-
-### 3. Worker
-Calls the configured LLM chain (Ollama → OpenRouter → Gemini fallback) with a context-rich prompt that includes task description, related file snapshots, previous validation errors, and output safety rules. Saves the generated file to the project filesystem.
-
-```
-Input : active_assignment, validation_issues (from prior cycles)
-Output: worker_outputs, file_registry update (in_progress → done/failed)
-```
-
-### 4. Executor
-Runs the project's build/test command (Python `pytest`, Node `npm test`, etc.) inside a 20-second timeout sandbox. Captures stdout/stderr for the Reviewer.
-
-```
-Input : file_registry (done files), project root
-Output: execution_results, runtime_errors
-```
-
-### 5. Validator
-Performs static analysis on all generated files: AST syntax checks, import resolution, and policy rules (path traversal detection, prompt injection patterns). Writes `validation_issues` back to state.
-
-```
-Input : project files, worker_queue
-Output: validation_issues, revision_tasks
-```
-
-### 6. Reviewer
-Calls the **Gemini auditor** (`FinalReview`) to inspect generated files holistically. Decides one of:
-- **active** → sprint complete, close successfully
-- **revision** → re-queue failed files, loop back to Dispatcher (max 6 cycles)
-- **fail** → terminal failure after exhausting retries
-
-```
-Input : validation_issues, execution_results, review_cycles
-Output: sprint_status ∈ {active, revision, fail, closed, rejected}
-```
-
-### Post-sprint Memory / Dreaming (Background)
-
-After the **Reviewer** reaches a terminal sprint decision (`approved` / `fail`), ARCHON schedules a **non-blocking** background memory pipeline:
-
-- **Extract**: writes a durable sprint summary Markdown into `projects/<name>/.meta/memory/extracts/`
-- **Consolidate** (gated + locked): merges recent extracts into a planner-facing memory file (default: `planner_memory.md`)
-- **Inject**: `ContextBuilder` includes a short slice as `[Tier0] Planner Memory: ...` in future Planner prompts
-
-The consolidation step is protected by:
-- **time gate** (`MEMORY_MIN_HOURS_BETWEEN_RUNS`)
-- **activity gate** (`MEMORY_MIN_SESSIONS`, based on sprint snapshot mtimes under `.meta/sprints/`)
-- **lock file** (`.consolidate-lock`, mtime = last successful consolidation)
-
-### Approval Gate
-
-Before any Worker phase starts, ARCHON waits for human approval. The gate is **idempotent** — duplicate approvals are rejected via `idempotency_key`. Approvals expire after 15 minutes.
-
-```
-/approve [approval_id]   → resumes graph at Dispatcher
-/reject  [approval_id]   → terminal state: planning_status = rejected
-/cancel  [approval_id]   → terminal state: planning_status = cancelled
-```
-
----
-
-## LLM Providers
-
-ARCHON supports a **fallback chain** across three provider types. If a provider fails or is unavailable, the next one in the chain is tried automatically.
-
-| Provider | Role | Notes |
-|---|---|---|
-| **Gemini** (Google) | Planner, Auditor, Worker fallback | Primary intelligence layer |
-| **Ollama** (local) | Worker (primary) | Zero-cost local inference; auto-detected at startup |
-| **OpenRouter** (Primary) | Worker | Free/paid model via OpenRouter API |
-| **OpenRouter** (Secondary) | Worker fallback | Secondary key + model for redundancy |
-
-**Fallback order for Workers**: Ollama → OpenRouter Primary → OpenRouter Secondary → Gemini stub
-
-The `AIScanner` (`/scan` command) probes all providers simultaneously and reports latency + token metrics before you start a sprint.
-
----
-
-## Interfaces
-
-### Textual TUI (CLI)
-
-A full-featured terminal UI powered by [Textual](https://textual.textualize.io/). Real-time event updates via EventBus. Supports all commands below.
-
-```bash
-python main.py --cli --no-telegram
-```
-
-### Telegram Bot
-
-Full workflow mirroring the CLI, accessible from any device. Requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
-
-```bash
-python main.py  # daemon mode, Telegram active if token is set
-```
-
-### Daemon Mode
-
-Runs as a background service with signal handlers (SIGINT/SIGTERM), heartbeat writes, PID file management, and automatic thread recovery on startup.
-
-```bash
-python main.py --cli          # TUI + Telegram + daemon
-python main.py --no-telegram  # TUI only
-python main.py                # Headless daemon (Telegram only)
-```
-
----
-
-## Skills Library
-
-ARCHON ships with **360 skill files** in `skills/` — structured knowledge documents for Planner AI and Coder AI covering every pattern used in the system.
-
-| Category | Examples |
-|---|---|
-| Sprint Lifecycle | planning, approval-gate, capacity-planning, risk-register, retrospective |
-| LangGraph Patterns | subgraph, node-error-boundary, hot-reload, state-persistence-recovery |
-| Async Python | asyncio-gather, async-context-manager, async-semaphore-throttling |
-| Code Quality | ast-manipulation, dead-code-detection, naming-convention, complexity-metric |
-| LLM Integration | prompt-chaining, few-shot-examples, response-streaming, tool-use-pattern |
-| Testing | test-data-builder, test-fixture-cleanup, coverage-check |
-| Security | api-key-masking, code-security-scan, environment-guard |
-
-See [`SKILLS_INDEX.md`](SKILLS_INDEX.md) for the full annotated list.
-
----
+- `GEMINI_API_KEY` is required for the active Gemini-backed planner, worker, scanner, and final review paths.
+- `scripts/preflight.py` currently treats `OLLAMA_BASE_URL` and `OLLAMA_MODEL` as required daemon/runtime settings and checks the configured Ollama model.
+- OpenRouter settings are present and probe methods exist in `AIScanner`, but the active worker fallback chain in `src/core/llm_providers.py` is Gemini-only in the current code.
+- Telegram is optional. If used, both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` should be configured together.
 
 ## Installation
 
 ### Prerequisites
 
-- Python ≥ 3.11
-- (Optional) [Ollama](https://ollama.ai) for local inference
-- Gemini API key (free tier works)
-- (Optional) OpenRouter API key(s)
-- (Optional) Telegram Bot token
+- Python 3.11 or newer
+- A Gemini API key for real planning/generation/review
+- Optional Ollama setup if you want `preflight` provider checks to pass with local model validation
+- Optional Telegram bot token and chat ID for remote chat control
 
-### Setup
+### Local Setup
 
 ```bash
-# 1. Clone
-git clone https://github.com/caglarkc/caglarkc-agent.git archon
-cd archon
-
-# 2. Create virtualenv
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
-
-# 3. Install
-pip install -e ".[dev]"
-
-# 4. Configure
-cp .env.example .env
-# Edit .env — at minimum set GEMINI_API_KEY
-
-# 5. Run preflight checks
-python scripts/preflight.py
-
-# 6. Launch
-python main.py --cli --no-telegram
-```
-
----
-
-## Configuration
-
-All configuration is via environment variables (`.env` file). Below are the most important settings:
-
-```env
-# ── Application ──────────────────────────────────────────────────
-APP_NAME=archon
-APP_ENV=development
-LOG_LEVEL=INFO
-
-# ── Storage ──────────────────────────────────────────────────────
-DATA_DIR=data
-PROJECTS_ROOT=projects
-SQLITE_DB_PATH=data/orchestrator.db
-GRAPH_CHECKPOINT_PATH=data/langgraph_checkpoints.sqlite
-
-# ── Gemini (Planner + Auditor + Fallback Worker) ─────────────────
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-flash-lite-latest
-MANAGER_USE_GEMINI=1
-MANAGER_MODEL=gemini-flash-lite-latest
-MANAGER_MAX_HISTORY_TURNS=12
-
-# ── Ollama (Local Worker) ─────────────────────────────────────────
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_MODEL=llama3.2                   # any model you have pulled
-
-# ── OpenRouter (Remote Worker) ────────────────────────────────────
-OPENROUTER_API_KEY_PRIMARY=your_primary_key
-OPENROUTER_API_KEY_SECONDARY=your_secondary_key
-OPENROUTER_MODEL=minimax/minimax-m2.5:free
-OPENROUTER_MODEL_SECONDARY=tencent/hy3-preview:free
-
-# ── Worker Behaviour ─────────────────────────────────────────────
-WORKER_USE_STUB=0               # 1 = dry run (no real LLM calls)
-FINAL_REVIEW_ENABLED=1
-FINAL_REVIEW_TIMEOUT_SECONDS=45.0
-HTTP_TIMEOUT_SECONDS=20.0
-
-# ── Memory / Dreaming (post-sprint background pipeline) ───────────
-# Writes under: projects/<project-name>/.meta/memory/
-MEMORY_AUTO_ENABLED=1
-MEMORY_CONSOLIDATION_ENABLED=1
-MEMORY_RELATIVE_DIR=.meta/memory
-MEMORY_PLANNER_SUMMARY_FILE=planner_memory.md
-
-# Gates (cheapest → most expensive): min hours → min sessions → lock
-MEMORY_MIN_HOURS_BETWEEN_RUNS=24
-MEMORY_MIN_SESSIONS=5
-MEMORY_SESSION_SCAN_INTERVAL_SECONDS=600
-MEMORY_LOCK_HOLDER_STALE_SECONDS=3600
-
-# Optional: use Gemini to consolidate extracts into planner memory
-MEMORY_CONSOLIDATION_USE_LLM=0
-MEMORY_CONSOLIDATION_MAX_INPUT_CHARS=12000
-
-# ── Telegram ─────────────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-```
-
----
-
-## Quick Start
-
-```bash
-# Start ARCHON
-python main.py --cli --no-telegram
-
-# Inside the TUI:
-
-# 1. Create a new project
-/new my-rest-api
-
-# 2. Describe what you want (Turkish or English)
-/r Build a FastAPI REST API with CRUD endpoints for a user table.
-   Include pytest tests and a Dockerfile.
-
-# 3. Review the generated plan
-/plan
-
-# 4. Approve and start execution
-/approve
-
-# 5. Monitor progress
-/status
-
-# 6. Browse generated files
-ls projects/my-rest-api/
-```
-
----
-
-## CLI Command Reference
-
-| Command | Description |
-|---|---|
-| `/new <name>` | Create a new project and start a conversation |
-| `/r <message>` | Send a message to the Planner |
-| `/plan [id]` | Request the Planner to produce / show the current draft plan |
-| `/changePlan <text>` | Refine the current draft plan before approving |
-| `/apply [note]` | Approve and immediately execute the current plan |
-| `/approve [id]` | Approve a pending plan (resumes Dispatcher) |
-| `/reject [id] [reason]` | Reject a pending plan (terminal) |
-| `/cancel [id] [reason]` | Cancel a pending plan (terminal) |
-| `/start [id]` | Start execution of an already-approved plan |
-| `/status` | Show live state, worker assignments, and metrics |
-| `/projects` | List all projects |
-| `/resume [id]` | Resume an existing project thread |
-| `/project use <id>` | Switch active project |
-| `/history <name>` | Show conversation and sprint history |
-| `/recover [id]` | Recover an interrupted execution from checkpoint |
-| `/close [reason]` | Terminate the active sprint |
-| `/scan` | Health-check all LLM providers (latency + tokens) |
-| `/help` | Show the full command reference |
-
----
-
-## Project Structure
-
-```
-archon/
-├── main.py                           # Daemon entry point & OrchestratorDaemon
-├── .env.example                      # Configuration template
-├── pyproject.toml                    # Package metadata & dependencies
-├── ai-orchestrator.service           # Systemd service unit
-├── SKILLS_INDEX.md                   # Full 360-skill annotated index
-│
-├── src/
-│   ├── config/
-│   │   ├── settings.py               # Pydantic settings (env-driven)
-│   │   └── logging_config.py         # Rotating file + console logging
-│   │
-│   ├── core/
-│   │   ├── graph_manager.py          # Thread lifecycle, approval flow, recovery
-│   │   ├── manager_planning.py       # ManagerPlanningService — Gemini planner
-│   │   ├── llm_providers.py          # Provider chain, prompt building, generation
-│   │   ├── final_review.py           # Gemini auditor (post-generation review)
-│   │   ├── ai_scanner.py             # Health probe for all LLM providers
-│   │   ├── retry_policy.py           # Exponential backoff + error classification
-│   │   ├── approval_guard.py         # Idempotent approval validation
-│   │   ├── event_bus.py              # Pub/sub system (EventBus)
-│   │   ├── state_manager.py          # In-memory + JSON snapshot persistence
-│   │   ├── project_manager.py        # Project CRUD
-│   │   ├── context_builder.py        # Context summary for prompts
-│   │   ├── memory_pipeline.py        # Post-review extract + consolidation scheduler
-│   │   ├── consolidation_lock.py     # .consolidate-lock (mtime=last run) + rollback
-│   │   ├── memory_paths.py           # Project-scoped memory root helpers
-│   │   ├── memory_sessions.py        # Sprint snapshot activity scan (mtime-based)
-│   │   ├── recovery.py               # Sprint recovery analysis
-│   │   ├── scheduler.py              # Fair scheduling across projects
-│   │   ├── state_transaction.py      # Transactional state updates
-│   │   └── contracts.py              # Pydantic models (Event, ApprovalRequest…)
-│   │
-│   ├── graph/
-│   │   ├── graph.py                  # LangGraph builder + SQLite checkpointer
-│   │   ├── state.py                  # OrchestratorState (TypedDict, 60+ fields)
-│   │   ├── edges.py                  # Conditional routing functions
-│   │   └── nodes/
-│   │       ├── planner.py            # Planning & approval gate
-│   │       ├── dispatcher.py         # Worker assignment & queue management
-│   │       ├── worker.py             # LLM file generation
-│   │       ├── executor.py           # Project build execution
-│   │       ├── validator.py          # Syntax + policy validation
-│   │       └── reviewer.py           # Review & retry decisions
-│   │
-│   ├── storage/
-│   │   ├── models.py                 # Pydantic models (Project, Sprint, FileRecord…)
-│   │   └── repository.py             # Database CRUD layer
-│   │
-│   └── interfaces/
-│       ├── cli/
-│       │   ├── app.py                # Textual TUI application
-│       │   ├── commands.py           # Command parser & executor
-│       │   ├── state_view.py         # Output formatting
-│       │   └── notifier.py           # Async event → TUI notifications
-│       └── telegram/
-│           └── bot.py                # python-telegram-bot handler
-│
-├── scripts/
-│   ├── preflight.py                  # Pre-launch configuration validation
-│   ├── check_connections.py          # LLM provider connectivity smoke test
-│   ├── healthcheck.py                # System health probe
-│   ├── smoke_fullstack.py            # End-to-end workflow test
-│   └── load_simulation.py            # Concurrent project stress test
-│
-├── tests/
-│   ├── test_cli_apply_command.py
-│   └── test_openrouter_only_models.py
-│
-├── docs/
-│   ├── MANAGER_PLANNING.md           # Planner integration deep-dive
-│   ├── REAL_WORKER.md                # Worker provider setup guide
-│   └── PHASE_ACCEPTANCE.md           # Phase completion criteria
-│
-├── data/                             # Runtime data (auto-created)
-│   ├── orchestrator.db               # SQLite project database
-│   ├── langgraph_checkpoints.sqlite  # Thread checkpoints
-│   ├── daemon_status.json            # Live daemon heartbeat
-│   └── ai-orchestrator.pid           # Daemon process ID
-│
-├── logs/                             # Rotating log files (auto-created)
-│   └── orchestrator.log
-│
-├── projects/                         # Generated project outputs (auto-created)
-│   └── <project-name>/
-│       ├── src/, tests/, Dockerfile… # AI-generated files
-│       └── .meta/context.md          # Execution context snapshot
-│
-└── skills/                           # 360 skill knowledge files
-    └── <skill-name>/SKILL.md
-```
-
----
-
-## Key Design Principles
-
-**1. Stateful, resumable execution**
-Every graph transition is persisted to SQLite via LangGraph's checkpointer. Crash the daemon mid-sprint — `python main.py` + `/recover` brings it back exactly where it stopped.
-
-**2. Approval-gated by design**
-No file is generated without an explicit human approval. The gate is idempotent (duplicate approvals are rejected), time-bounded (15-minute expiry), and audit-logged.
-
-**3. Multi-model fallback chain**
-Workers try Ollama (free, local) → OpenRouter Primary → OpenRouter Secondary → Gemini stub. A single provider outage never blocks a sprint.
-
-**4. Self-correcting loop**
-Validator failures and runtime errors are fed back into the Worker prompt on the next cycle. The Reviewer enforces a maximum of 6 correction cycles before failing gracefully.
-
-**5. File reservation system**
-The Dispatcher atomically reserves files before generation. No two workers ever write the same file concurrently — a common race condition in naive multi-agent systems.
-
-**6. Async-first**
-Every component is built on `asyncio` + `httpx`. The EventBus decouples the LangGraph runtime from the CLI and Telegram interfaces without blocking either.
-
-**7. Bilingual support**
-The Planner understands Turkish and English natively. Execution-intent keywords (`uygula`, `apply`, `sprint baslat`, `implement`) are detected in both languages.
-
----
-
-## Testing
-
-```bash
-# Recommended: venv (PEP 668 friendly)
-python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-
-# Unit & integration tests
-pytest
-
-# LLM provider connectivity
-python scripts/check_connections.py
-
-# Full configuration validation
-python scripts/preflight.py
-
-# End-to-end workflow smoke test
-python scripts/smoke_fullstack.py
-
-# Concurrent load simulation
-python scripts/load_simulation.py
+cp .env.example .env
 ```
 
----
+Edit `.env` before running the daemon or checks.
+
+## Running The Application
+
+### Recommended Local CLI Mode
+
+```bash
+./.venv/bin/python main.py --cli --no-telegram
+```
+
+This starts the Textual CLI and disables Telegram for local testing.
+
+### Daemon Without Telegram
+
+```bash
+./.venv/bin/python main.py --no-telegram
+```
+
+### Daemon With CLI And Telegram
+
+```bash
+./.venv/bin/python main.py --cli
+```
+
+### Headless Daemon
+
+```bash
+./.venv/bin/python main.py
+```
+
+Telegram starts only when `TELEGRAM_BOT_TOKEN` is configured and Telegram is not disabled.
+
+## CLI Workflow
+
+Start the CLI:
+
+```bash
+./.venv/bin/python main.py --cli --no-telegram
+```
+
+Inside the CLI:
+
+```text
+/new My Project
+/r Build a small FastAPI service with CRUD endpoints and tests.
+/plan
+/approve
+/status
+```
+
+Useful commands implemented in `src/interfaces/cli/commands.py`:
+
+```text
+/task <text>
+/new <project name>
+/resume [project_id or project name]
+/r <message>
+/plan [project_id or project name]
+/changePlan <change request>
+/start [project_id or project name]
+/apply [optional note]
+/status
+/approve [approval_id]
+/reject [approval_id] [reason]
+/cancel [approval_id] [reason]
+/close [reason]
+/recover [project_id or project name]
+/projects
+/history <project>
+/project use <id or project name>
+/scan
+/help
+```
+
+## Generated Project Output
+
+Generated projects are written under:
+
+```text
+projects/<project-name>/
+```
+
+The project manager also creates metadata folders such as:
+
+```text
+projects/<project-name>/.meta/
+projects/<project-name>/.meta/sprints/
+projects/<project-name>/.meta/archived/
+projects/<project-name>/.meta/memory/
+projects/<project-name>/.meta/memory/extracts/
+```
+
+Examples of generated metadata include `plan.json`, sprint snapshots, context output, memory extracts, and consolidated planner memory.
+
+## Testing And Quality Checks
+
+Install development dependencies first:
+
+```bash
+pip install -e ".[dev]"
+```
+
+Run the test suite:
+
+```bash
+pytest
+```
+
+Run operational checks:
+
+```bash
+./.venv/bin/python -m scripts.preflight
+./.venv/bin/python -m scripts.healthcheck
+./.venv/bin/python -m scripts.check_connections
+./.venv/bin/python -m scripts.smoke_fullstack
+./.venv/bin/python -m scripts.backup_restore_test
+./.venv/bin/python -m scripts.load_simulation
+```
+
+Additional phase-check scripts are available under `scripts/`.
 
 ## Deployment
 
-### Systemd Service
+The repository includes a systemd unit:
+
+```text
+ai-orchestrator.service
+```
+
+The current service file is configured for this local path:
+
+```text
+/home/caglarkc/Desktop/Github/caglarkc-agent
+```
+
+Before using it on another machine, update:
+
+- `User`
+- `WorkingDirectory`
+- `EnvironmentFile`
+- `ExecStart`
+- `StandardOutput`
+- `StandardError`
+
+Typical systemd flow:
 
 ```bash
-# Copy and enable the service
 sudo cp ai-orchestrator.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable ai-orchestrator
 sudo systemctl start ai-orchestrator
-
-# View logs
 journalctl -u ai-orchestrator -f
 ```
 
-The service file expects:
-- Working directory: `/home/user/caglarkc-agent`
-- Virtual environment at `.venv/`
-- `.env` file present in the working directory
+Operational documentation is available in:
 
-### Health Monitoring
+- `docs/OPERATIONS.md`
+- `docs/DEPLOYMENT_CHECKLIST.md`
+- `docs/INCIDENT_RUNBOOK.md`
+- `RUNBOOK.md`
 
-```bash
-# Live daemon status
-cat data/daemon_status.json
+## Security And Reliability Notes
 
-# Provider health (from inside TUI)
-/scan
-```
+The codebase includes several guardrails that are important for an AI code-generation orchestrator:
 
----
+- **Approval gate**: Plans require explicit approval before execution.
+- **Idempotency protection**: Approval handling rejects duplicate approval attempts.
+- **Path safety checks**: Worker, executor, validator, and final review file reading paths guard against traversal outside the project root.
+- **Prompt-injection policy checks**: Validator flags generated artifacts containing phrases such as `ignore previous instructions` or `prompt override`.
+- **Forbidden path checks**: Validator flags generated content containing `/etc/` or home-directory path usage.
+- **Frontend artifact checks**: Executor validates static HTML structure, CSS brace balance, JavaScript syntax when Node is available, DOM selector consistency, and missing local CSS assets.
+- **Timeouts**: HTTP/model calls and executor checks use configured or fixed timeouts to avoid indefinite blocking.
+- **Retry and failure records**: Worker failures are classified, retried when appropriate, and stored with recommendations.
+- **State recovery**: LangGraph checkpoints and JSON state snapshots support recovery after interruption.
+- **Memory consolidation locks**: The memory pipeline uses time gates, session gates, and lock files to avoid repeated or concurrent consolidation.
 
-## Dependencies
+## Current Limitations
 
-| Package | Version | Purpose |
-|---|---|---|
-| `langgraph` | ≥1.0 | State machine orchestration |
-| `langgraph-checkpoint-sqlite` | ≥2.0 | Thread persistence |
-| `langchain-google-genai` | ≥2.0 | Gemini integration |
-| `langchain-openai` | ≥0.3 | OpenRouter integration |
-| `pydantic` / `pydantic-settings` | ≥2.7 | Data validation & settings |
-| `textual` | ≥0.86 | Terminal UI |
-| `python-telegram-bot` | ≥21.6 | Telegram interface |
-| `httpx` | ≥0.27 | Async HTTP client |
-| `aiosqlite` | ≥0.20 | Async SQLite access |
-| `rich` | ≥13.7 | Console output formatting |
+- No screenshot or image assets were found in the repository.
+- No `LICENSE` file was found in the project root.
+- No Dockerfile or container deployment configuration was found.
+- OpenRouter and Ollama settings/probe helpers exist, but active worker generation in the inspected code is Gemini-only.
+- `AIScanner.scan_all()` currently returns only the Gemini scan result, even though individual Ollama and OpenRouter scan methods exist.
+- `scripts/preflight.py` requires a configured Ollama model, while the active worker generation path uses Gemini.
+- Several docs are written in Turkish; the README is intentionally written in English for international portfolio use.
 
----
+## Future Improvements
 
-## License
+Potential next steps based on the repository's docs and current implementation:
 
-MIT — see [LICENSE](LICENSE) for details.
+- Expand `AIScanner.scan_all()` to include Ollama and OpenRouter when configured.
+- Align preflight requirements with the active provider strategy, or clearly separate optional local-provider checks from required runtime checks.
+- Add true multi-provider worker fallback if Ollama/OpenRouter should be part of execution, not only settings/probes.
+- Add a Dockerfile or compose setup if container deployment is desired.
+- Add screenshots or conceptual architecture images for portfolio presentation.
+- Add a root `LICENSE` file if the project is intended for public reuse.
+- Add coverage reporting and CI configuration for automated test visibility.
+- Continue developing worker tool-calling support if workers should inspect and execute generated code directly.
 
----
+## Repository Status Summary
 
-*ARCHON — because every great team needs an orchestrator.*
+ARCHON is best described as a local, approval-gated AI software development orchestrator with a LangGraph execution core, SQLite persistence, Textual and Telegram interfaces, Gemini-backed planning/generation/review, validation and recovery tooling, and an extensive skill-document library.
