@@ -1,23 +1,59 @@
-/.venv/
-**/__pycache__/
-*.py[cod]
+# Local secrets; only sanitized example files belong in Git.
 .env
-# Test checkpoint SQLite files
-data/*.sqlite
-data/*.sqlite-shm
-data/*.sqlite-wal
-data/*.sqlite.bak
-data/fullstack-smoke-*/
-data/backup-restore-*/
-data/phase7-check-*/
-data/phase8-check-*/
-data/test_resume.sqlite
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
 
-# Runtime data
-data/state_snapshot.json
-data/daemon_status.json
-data/orchestrator.db
-logs/
+# Python environments, caches, and packaging output.
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+build/
+dist/
 
-# Generated project outputs from tests
-projects/
+# Runtime state, backups, logs, and generated projects.
+/data/*
+!/data/.gitkeep
+/logs/*
+!/logs/.gitkeep
+/projects/*
+!/projects/.gitkeep
+*.log
+*.log.*
+*.pid
+*.sqlite
+*.sqlite-*
+*.sqlite.bak
+*.db
+*.db-*
+*.db.bak
+
+# Dependencies and locally downloaded reference repositories.
+node_modules/
+/crewAI-main/
+
+# Editor and operating-system files.
+.DS_Store
+._*
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
